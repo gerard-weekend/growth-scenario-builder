@@ -370,6 +370,45 @@
     padding: 0;
   }
   .tp-swatches button.active { border-color: var(--w-midnight); transform: scale(1.05); }
+
+  /* Snapshot list — rendered under the action buttons */
+  .snapshot-list { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+  .snapshot-list:empty { margin-top: 0; }
+  .snapshot-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px;
+    background: var(--w-warm-white);
+    border-radius: 6px;
+    font-size: 12px; letter-spacing: -0.005em;
+  }
+  .snapshot-row .sw {
+    flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%;
+  }
+  .snapshot-row .name {
+    flex: 1 1 auto; min-width: 0; font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .snapshot-row .arr { flex: 0 0 auto; color: var(--w-midnight-60); font-variant-numeric: tabular-nums; }
+  .snapshot-row .x {
+    flex: 0 0 auto; width: 18px; height: 18px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 50%; cursor: pointer;
+    color: var(--w-midnight-40);
+    transition: background .12s, color .12s;
+  }
+  .snapshot-row .x:hover { background: rgba(10,3,34,0.08); color: var(--w-midnight); }
+
+  /* Toast — saved confirmation */
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(8px);
+    background: var(--w-midnight); color: var(--w-warm-white);
+    font-family: var(--font-display); font-size: 12px; font-weight: 500; letter-spacing: -0.005em;
+    padding: 10px 16px; border-radius: 8px;
+    box-shadow: var(--shadow-lifted);
+    opacity: 0; pointer-events: none; z-index: 100;
+    transition: opacity .18s ease, transform .18s ease;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 </style>
 </head>
 <body>
@@ -392,7 +431,7 @@
       <section class="card toggles">
         <div class="head">
           <h2>Scenario toggles</h2>
-          <span class="count" id="togglesCount">0 of 8 on</span>
+          <span class="count" id="togglesCount" style="display:none"></span>
         </div>
         <ul id="togglesList"></ul>
       </section>
@@ -415,6 +454,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
           Reset to baseline
         </button>
+        <div class="snapshot-list" id="snapshotList"></div>
       </section>
     </aside>
 
@@ -540,6 +580,8 @@
     </div>
   </div>
 </div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
 // Growth Scenario Modeler — app logic + model stub
@@ -1384,7 +1426,7 @@ function render() {
   cacDeltaEl.textContent = (cacDelta >= 0 ? '+' : '\u2212') + dollarSign + Math.abs(cacDelta).toFixed(0) + ' vs baseline';
 
   qs('#kpiLtvCac').textContent = m.kpis.blendedLTVCAC.toFixed(1) + '\u00D7';
-  qs('#kpiLtvCacSub').textContent = m.kpis.blendedLTVCAC >= 3 ? 'healthy (\u2265 3\u00D7)' : m.kpis.blendedLTVCAC >= 2 ? 'acceptable' : 'below 2\u00D7 \u2014 review';
+  qs('#kpiLtvCacSub').textContent = '';
 
   const onCount = Object.values(state.toggles).filter(Boolean).length;
   qs('#togglesCount').textContent = onCount + ' of 8 on';
@@ -1447,8 +1489,7 @@ function render() {
       x.className = 'x'; x.textContent = '\u00D7';
       x.addEventListener('click', (e) => {
         e.stopPropagation();
-        state.snapshots = state.snapshots.filter(s => s.id !== removableId);
-        render();
+        removeSnapshot(removableId);
       });
       c.appendChild(x);
     }
@@ -1604,16 +1645,74 @@ function render() {
   tbody.appendChild(trT);
 
   qs('#sumMeta').textContent = onCount === 0 ? 'Baseline scenario' : (onCount + ' scenario toggle' + (onCount === 1 ? '' : 's') + ' on');
+
+  renderSnapshotList();
 }
 function td(_kind, text) { const c = document.createElement('td'); c.textContent = text; return c; }
 
 // ----- Snapshot + reset --------------------------------------------------
+// ----- Snapshot helpers --------------------------------------------------
+const SNAPSHOT_STORAGE_KEY = 'growth-scenario-snapshots-v1';
+
+function persistSnapshots() {
+  try { localStorage.setItem(SNAPSHOT_STORAGE_KEY, JSON.stringify(state.snapshots)); } catch (_) {}
+}
+
+function loadSnapshots() {
+  try {
+    const raw = localStorage.getItem(SNAPSHOT_STORAGE_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) state.snapshots = arr;
+    }
+  } catch (_) {}
+}
+
+function showToast(msg) {
+  const t = qs('#toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._t);
+  t._t = setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+function removeSnapshot(id) {
+  state.snapshots = state.snapshots.filter(s => s.id !== id);
+  persistSnapshots();
+  render();
+}
+
+function renderSnapshotList() {
+  const wrap = qs('#snapshotList');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  state.snapshots.forEach(s => {
+    const row = document.createElement('div'); row.className = 'snapshot-row';
+    const sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = s.color;
+    const nm = document.createElement('span'); nm.className = 'name'; nm.textContent = s.name;
+    const eoy = (s.eoyARR != null) ? s.eoyARR : (s.data && s.data.weeklyARR ? s.data.weeklyARR[EOY_2026_IDX] : 0);
+    const arr = document.createElement('span'); arr.className = 'arr'; arr.textContent = dollarSign + (eoy/1e6).toFixed(1) + 'M';
+    const x = document.createElement('span'); x.className = 'x'; x.textContent = '×'; x.title = 'Remove snapshot';
+    x.addEventListener('click', () => removeSnapshot(s.id));
+    row.appendChild(sw); row.appendChild(nm); row.appendChild(arr); row.appendChild(x);
+    wrap.appendChild(row);
+  });
+}
+
 function takeSnapshot() {
   const name = prompt('Name this snapshot', 'Scenario ' + (state.snapshots.length + 1));
   if (!name) return;
   const color = SNAPSHOT_COLORS[state.snapshots.length % SNAPSHOT_COLORS.length];
   const m = computeModel(state);
-  state.snapshots.push({ id: 'snap_' + Date.now(), name, color, data: { weeklyARR: m.weeklyARR } });
+  state.snapshots.push({
+    id: 'snap_' + Date.now(),
+    name, color,
+    eoyARR: m.kpis.eoyARR,
+    data: { weeklyARR: m.weeklyARR },
+  });
+  persistSnapshots();
+  showToast('Snapshot "' + name + '" saved');
   render();
 }
 function resetBaseline() {
@@ -1692,6 +1791,7 @@ function init() {
   qs('#snapshotBtn').addEventListener('click', takeSnapshot);
   qs('#resetBtn').addEventListener('click', resetBaseline);
   setupTweaks();
+  loadSnapshots();  // restore any saved snapshots from localStorage
   render();
   // In iframes that aren't yet visible, rAF can be throttled to never fire.
   // setTimeout(0) is reliable. Force a second paint after layout settles.
