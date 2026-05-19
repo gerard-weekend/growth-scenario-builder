@@ -436,7 +436,7 @@
           <div class="delta" id="kpiCacDelta">vs baseline</div>
         </div>
         <div class="kpi">
-          <div class="label">LTV : CAC</div>
+          <div class="label">3Y Net LTV : CAC</div>
           <div class="num" id="kpiLtvCac">&nbsp;</div>
           <div class="sub" id="kpiLtvCacSub">blended</div>
         </div>
@@ -462,7 +462,7 @@
         </section>
         <section class="chart-card">
           <div class="head">
-            <div class="title">LTV : CAC</div>
+            <div class="title">3Y Net LTV : CAC</div>
             <div class="now">Blended + per platform</div>
           </div>
           <div class="legend sub-legend" id="ltvLegend"></div>
@@ -499,7 +499,8 @@
             <th>% of ARR</th>
             <th>Marketing spend</th>
             <th>Blended CAC</th>
-            <th>LTV : CAC</th>
+            <th>3Y Net LTV : CAC</th>
+            <th>3Y Gross LTV : CAC</th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -625,8 +626,8 @@ const BASE_PRICE_MONTHLY = 12.99;  // Uniform across platforms; Price Increase a
 const DEFAULT_PLATFORM_STATE = {
   FireTV:  { spend: { q2_26: 3.0, q3_26: 4.0, q4_26: 5.5, q1_27: 4.0 }, cpa: 133, m6: 0.49 },
   Roku:    { spend: { q2_26: 1.9, q3_26: 2.7, q4_26: 4.0, q1_27: 3.0 }, cpa:  55, m6: 0.32 },
-  LG:      { spend: { q2_26: 0.2, q3_26: 0.5, q4_26: 0.5, q1_27: 0.5 }, cpa:  34, m6: 0.33 },
-  Samsung: { spend: { q2_26: 0.2, q3_26: 0.5, q4_26: 0.5, q1_27: 0.5 }, cpa:  15, m6: 0.35 },
+  LG:      { spend: { q2_26: 0.2, q3_26: 0.5, q4_26: 0.5, q1_27: 0.5 }, cpa:  80, m6: 0.33 },
+  Samsung: { spend: { q2_26: 0.2, q3_26: 0.5, q4_26: 0.5, q1_27: 0.5 }, cpa:  80, m6: 0.35 },
   Web:     { spend: { q2_26: 0.4, q3_26: 1.0, q4_26: 1.5, q1_27: 1.5 }, cpa: 200, m6: 0.32 },
 };
 // Q1 2026 qualified-CPA per platform — referenced by FireTV "snap to Q1" toggle
@@ -635,6 +636,15 @@ const Q1_QUALIFIED_CPA = { FireTV: 101, Roku: 52, LG: 53, Samsung: 47, Web: 70 }
 const WEB_CPA_POST_UC = 70;
 // Seasonal Boost — flat organic Christmas lift, distributed per-week across December
 const SEASONAL_BOOST_DECEMBER = { FireTV: 6000, Roku: 6000, LG: 1500, Samsung: 1500, Web: 0 };
+
+// Fixed 3-year LTV per platform (finance-blessed values). The engine uses these
+// directly as the "anchor" LTVs at default retention. When the M6 slider moves
+// (via slider or via the retention-related scenario toggles), each platform's
+// LTV scales by the ratio of (new 3Y retention sum) / (default 3Y retention sum),
+// so retention improvements still flow through to LTV:CAC. Gross = revenue-based;
+// Net = after platform / payment / support costs.
+const LTV_GROSS_3Y = { FireTV: 149, Roku: 105, LG: 120, Samsung: 120, Web: 120 };
+const LTV_NET_3Y   = { FireTV: 115, Roku:  77, LG: 103, Samsung: 103, Web: 103 };
 
 // Jan–Apr 2026 actual marketing spend, including LG/Samsung partner commitments.
 // Used in the "2026 Marketing Spend" KPI, which sums these historicals plus the
@@ -770,12 +780,12 @@ function computeModel(controlState) {
     return Math.pow(1 + t / b, -c) * Math.exp(-lam * t);
   }
 
-  // LTV per sub: sum of 60-month effective retention × price × margin
-  function ltvPerSub(p, price, m6Target) {
+  // 3-year retention sum at a given M6 target. Used to scale the fixed 3Y LTVs
+  // when retention sliders / retention-related scenarios change the curve.
+  function retentionSum3Y(p, m6Target) {
     const cv = ENGINE_DATA.curves[p];
     const b = cv.b;
     const lam = cv.lambda || 0;
-    const margin = ENGINE_DATA.margins_default[p];
     let c;
     if (m6Target == null) {
       c = cv.c;
@@ -783,10 +793,28 @@ function computeModel(controlState) {
       c = -(Math.log(Math.max(m6Target, 0.001)) + 6 * lam) / Math.log(1 + 6 / b);
     }
     let sum = 0;
-    for (let m = 0; m <= 60; m++) {
+    for (let m = 0; m <= 36; m++) {
       sum += Math.pow(1 + m / b, -c) * Math.exp(-lam * m);
     }
-    return sum * price * margin;
+    return sum;
+  }
+  // Baseline 3Y retention sum per platform, at the default M6. Used as the
+  // denominator when scaling the fixed LTV anchors. Computed once on first
+  // invocation of computeModel for the run (defaults don't change at runtime).
+  if (!computeModel._retSumBaseline) {
+    computeModel._retSumBaseline = {};
+    for (const p of PLATFORMS) {
+      computeModel._retSumBaseline[p] = retentionSum3Y(p, null);  // null = use original c
+    }
+  }
+  const RET_SUM_BASE = computeModel._retSumBaseline;
+
+  // Returns {gross, net} LTV per sub for a platform, given the current M6.
+  // The fixed-LTV anchors scale linearly with the 3Y retention sum, so
+  // retention scenarios still move LTV.
+  function ltvPair(p, m6Target) {
+    const scale = retentionSum3Y(p, m6Target) / RET_SUM_BASE[p];
+    return { gross: LTV_GROSS_3Y[p] * scale, net: LTV_NET_3Y[p] * scale };
   }
 
   // === Initialize cohorts with legacy pre-May-1 history ===
@@ -797,22 +825,25 @@ function computeModel(controlState) {
   }
 
   const perPlatformWeekly = {};
-  for (const p of PLATFORMS) perPlatformWeekly[p] = { subs: [], spend: [], newSubs: [], arr: [], cac: [], ltvCac: [] };
+  for (const p of PLATFORMS) perPlatformWeekly[p] = { subs: [], spend: [], newSubs: [], arr: [], cac: [], ltvCacNet: [], ltvCacGross: [] };
 
   const weeklyARR = [];
   const weeklyCAC = [];
-  const weeklyLTVCAC = [];
+  const weeklyLTVCAC = [];        // blended NET LTV:CAC (the conservative view)
+  const weeklyLTVCACGross = [];   // blended GROSS LTV:CAC
   const weeklyMarketingSpend = [];  // total weekly $, including partner commits
 
   let lastEff = null;
   const partnerWeekly = (ENGINE_DATA.partner_commit.LG + ENGINE_DATA.partner_commit.Samsung) * (7 / DAYS_PER_MONTH);
 
   // LTV cache so we don't recompute the 60-month sum every cell when M6 is unchanged
+  // LTV cache: {gross, net} per (platform, m6) so the 60-week loop doesn't
+  // re-evaluate the retention-sum integral when M6 hasn't changed.
   const ltvCache = new Map();
   function getLTV(p, m6) {
     const key = p + '|' + m6.toFixed(4);
     let v = ltvCache.get(key);
-    if (v == null) { v = ltvPerSub(p, BASE_PRICE_MONTHLY, m6); ltvCache.set(key, v); }
+    if (v == null) { v = ltvPair(p, m6); ltvCache.set(key, v); }
     return v;
   }
 
@@ -861,7 +892,8 @@ function computeModel(controlState) {
     // 2) Age cohorts; sum active + ARR per platform
     let weekARRTotal = 0;
     let weekActiveTotal = 0;
-    let ltvWeighted = 0;
+    let ltvGrossWeighted = 0;
+    let ltvNetWeighted = 0;
     for (const p of PLATFORMS) {
       const e = eff[p];
       const m6 = e.m6;
@@ -889,18 +921,22 @@ function computeModel(controlState) {
         cacDisplay = (platformVarSpend + platformPartnerWk) / perPlatformWeekly[p].newSubs[w];
       }
       perPlatformWeekly[p].cac.push(cacDisplay);
-      const ltv = getLTV(p, m6);
-      perPlatformWeekly[p].ltvCac.push(cacDisplay > 0 ? ltv / cacDisplay : 0);
+      const ltv = getLTV(p, m6);  // {gross, net} scaled with current M6
+      perPlatformWeekly[p].ltvCacGross.push(cacDisplay > 0 ? ltv.gross / cacDisplay : 0);
+      perPlatformWeekly[p].ltvCacNet  .push(cacDisplay > 0 ? ltv.net   / cacDisplay : 0);
       weekARRTotal += arr;
       weekActiveTotal += active;
-      ltvWeighted += ltv * active;
+      ltvGrossWeighted += ltv.gross * active;
+      ltvNetWeighted   += ltv.net   * active;
     }
 
     weeklyARR.push(weekARRTotal);
     const blendedCacW = weekNewTotal > 0 ? (weekSpendTotal + partnerWeekly) / weekNewTotal : 0;
     weeklyCAC.push(blendedCacW);
-    const blendedLTVw = weekActiveTotal > 0 ? ltvWeighted / weekActiveTotal : 0;
-    weeklyLTVCAC.push(blendedCacW > 0 ? blendedLTVw / blendedCacW : 0);
+    const blendedLtvGrossW = weekActiveTotal > 0 ? ltvGrossWeighted / weekActiveTotal : 0;
+    const blendedLtvNetW   = weekActiveTotal > 0 ? ltvNetWeighted   / weekActiveTotal : 0;
+    weeklyLTVCAC.push(blendedCacW > 0 ? blendedLtvNetW / blendedCacW : 0);  // chart uses NET
+    weeklyLTVCACGross.push(blendedCacW > 0 ? blendedLtvGrossW / blendedCacW : 0);
     // Total weekly marketing spend, including partner commitments
     weeklyMarketingSpend.push(weekSpendTotal + partnerWeekly);
   }
@@ -922,8 +958,14 @@ function computeModel(controlState) {
     }
     const cac = nNew > 0 ? mkt / nNew : 0;
     const m6 = lastEff[p].m6;
-    const ltv = getLTV(p, m6);
-    return { platform: p, subs, arr, mkt, cac, ltv, ltvCac: cac > 0 ? ltv / cac : 0 };
+    const ltv = getLTV(p, m6);  // {gross, net}
+    return {
+      platform: p, subs, arr, mkt, cac,
+      ltvGross: ltv.gross,
+      ltvNet:   ltv.net,
+      ltvCacGross: cac > 0 ? ltv.gross / cac : 0,
+      ltvCacNet:   cac > 0 ? ltv.net   / cac : 0,
+    };
   });
 
   const eoyARR = weeklyARR[EOY_2026_IDX];
@@ -934,25 +976,28 @@ function computeModel(controlState) {
   for (let w = 0; w <= EOY_2026_IDX; w++) modeledMaytoDec2026 += weeklyMarketingSpend[w];
   const annual2026MarketingSpend = JAN_APR_2026_ACTUAL_TOTAL + modeledMaytoDec2026;
 
-  // Blended trailing-13-week CAC / LTV:CAC around EoY 2026
+  // Blended trailing-13-week CAC / LTV:CAC (net) / LTV:CAC (gross) around EoY 2026
   const startW = Math.max(0, EOY_2026_IDX - 12);
-  let cacS = 0, cacN = 0, ltvS = 0, ltvN = 0;
+  let cacS = 0, cacN = 0, ltvNetS = 0, ltvNetN = 0, ltvGrS = 0, ltvGrN = 0;
   for (let w = startW; w <= EOY_2026_IDX; w++) {
     if (weeklyCAC[w] > 0) { cacS += weeklyCAC[w]; cacN++; }
-    if (weeklyLTVCAC[w] > 0) { ltvS += weeklyLTVCAC[w]; ltvN++; }
+    if (weeklyLTVCAC[w] > 0) { ltvNetS += weeklyLTVCAC[w]; ltvNetN++; }
+    if (weeklyLTVCACGross[w] > 0) { ltvGrS += weeklyLTVCACGross[w]; ltvGrN++; }
   }
   const blendedCAC = cacN > 0 ? cacS / cacN : 0;
-  const blendedLTVCAC = ltvN > 0 ? ltvS / ltvN : 0;
+  const blendedLTVCAC      = ltvNetN > 0 ? ltvNetS / ltvNetN : 0;
+  const blendedLTVCACGross = ltvGrN  > 0 ? ltvGrS  / ltvGrN  : 0;
 
   const kpis = {
     eoyARR,
     gapToTarget: eoyARR - ENGINE_DATA.target_eoy_arr,
     blendedCAC,
-    blendedLTVCAC,
+    blendedLTVCAC,           // Net (the conservative one shown in KPI card)
+    blendedLTVCACGross,
     annual2026MarketingSpend,
   };
 
-  return { weeklyARR, weeklyCAC, weeklyLTVCAC, weeklyMarketingSpend,
+  return { weeklyARR, weeklyCAC, weeklyLTVCAC, weeklyLTVCACGross, weeklyMarketingSpend,
            platformSummary, kpis, perPlatformWeekly };
 }
 
@@ -1443,7 +1488,7 @@ function render() {
   cpsChart.update(firstRender ? undefined : 'none');
 
   ltvChart.data.datasets = [
-    ...platformDatasets(p => m.perPlatformWeekly[p].ltvCac),
+    ...platformDatasets(p => m.perPlatformWeekly[p].ltvCacNet),
     {
       label: 'Blended',
       data: m.weeklyLTVCAC.map((v, i) => ({ x: WEEKS[i], y: v })),
@@ -1541,7 +1586,8 @@ function render() {
     tr.appendChild(td('text', ((r.arr / totalARR) * 100).toFixed(0) + '%'));
     tr.appendChild(td('text', fmtM(r.mkt)));
     tr.appendChild(td('text', fmtCash(r.cac)));
-    tr.appendChild(td('text', r.ltvCac.toFixed(1) + '\u00D7'));
+    tr.appendChild(td('text', r.ltvCacNet.toFixed(1) + '\u00D7'));
+    tr.appendChild(td('text', r.ltvCacGross.toFixed(1) + '\u00D7'));
     tbody.appendChild(tr);
   });
   const totalSubs = m.platformSummary.reduce((s, r) => s + r.subs, 0);
@@ -1554,6 +1600,7 @@ function render() {
   trT.appendChild(td('text', fmtM(totalMkt)));
   trT.appendChild(td('text', fmtCash(m.kpis.blendedCAC)));
   trT.appendChild(td('text', m.kpis.blendedLTVCAC.toFixed(1) + '\u00D7'));
+  trT.appendChild(td('text', m.kpis.blendedLTVCACGross.toFixed(1) + '\u00D7'));
   tbody.appendChild(trT);
 
   qs('#sumMeta').textContent = onCount === 0 ? 'Baseline scenario' : (onCount + ' scenario toggle' + (onCount === 1 ? '' : 's') + ' on');
@@ -1620,11 +1667,28 @@ function init() {
   buildHeroChart();
   cpsChart   = buildSubChart('#cpsChart',   '#2145F7', v => dollarSign + Math.round(v));
   ltvChart   = buildSubChart('#ltvChart',   '#2145F7', v => v.toFixed(1) + '\u00D7');
-  spendChart = buildSubChart('#spendChart', '#0A0322', v => dollarSign + (v/1e6).toFixed(1) + 'M');
+  spendChart = buildSubChart('#spendChart', '#0A0322', v => dollarSign + (v/1e6).toFixed(2) + 'M/mo');
   subsChart  = buildSubChart('#subsChart',  '#0A0322', v => Math.round(v/1000) + 'K');
   // The subs chart is stacked area \u2014 y-axis must allow stacking.
   subsChart.options.scales.y.stacked = true;
   subsChart.options.scales.y.beginAtZero = true;
+
+  // Tooltips: trigger anywhere along the x-axis (not only when the cursor sits
+  // precisely on a line). For the stacked subs chart, show every platform's
+  // contribution at that point with color swatches; for the single-line spend
+  // chart, just the value.
+  function dateTitle(items) {
+    if (!items.length) return '';
+    const d = new Date(items[0].parsed.x);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+  spendChart.options.interaction = { mode: 'index', intersect: false };
+  spendChart.options.plugins.tooltip.callbacks.title = dateTitle;
+  subsChart.options.interaction = { mode: 'index', intersect: false };
+  subsChart.options.plugins.tooltip.displayColors = true;
+  subsChart.options.plugins.tooltip.callbacks.title = dateTitle;
+  subsChart.options.plugins.tooltip.callbacks.label = (item) =>
+    ' ' + item.dataset.label + ': ' + Math.round(item.parsed.y).toLocaleString();
   qs('#snapshotBtn').addEventListener('click', takeSnapshot);
   qs('#resetBtn').addEventListener('click', resetBaseline);
   setupTweaks();
