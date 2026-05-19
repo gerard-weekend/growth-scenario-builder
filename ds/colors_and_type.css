@@ -1,0 +1,217 @@
+/* ------------------------------------------------------------------
+   Weekend Design System — colors_and_type.css
+   The Weekend brand is a TV-game-show-inspired streaming experience.
+   Navy Ink sits on Chalk; Sunny Yellow is the hero; pops of pink,
+   lime and blue punctuate. Type is Weekend Repro Medium for almost
+   everything, Karl ST Medium for playful script/captions, and
+   GT Super for pitch-deck data. This file is the single source of
+   truth for color + type tokens.
+   ------------------------------------------------------------------ */
+
+@import url("./fonts/fonts.css");
+
+:root {
+  /* ─── Named brand palette (official — see brand guide page 02) ─
+     Primary: Canary
+     Accents: Clementine, Raspberry, Orchid, Pink, Sky, Cobalt, Hunter, Limon
+     Neutrals: Warm White, Warmer White, Midnight Blue
+     ───────────────────────────────────────────────────────────── */
+
+  /* Primary */
+  --w-canary:         #FFDA0A;   /* the flagship hero yellow */
+  --w-canary-shadow:  #D1A812;   /* drop-shadow tint under canary elements */
+
+  /* Neutrals */
+  --w-midnight:       #0A0322;   /* Midnight Blue — primary foreground */
+  --w-warm-white:     #F3F4F1;   /* primary background / paper */
+  --w-warmer-white:   #ECECDB;   /* secondary paper / cards */
+  --w-white:          #FFFFFF;
+  --w-black:          #000000;
+
+  /* Midnight-Blue alpha scale for text/hairline hierarchy */
+  --w-midnight-90:    rgba(10, 3, 34, 0.90);
+  --w-midnight-60:    rgba(10, 3, 34, 0.60);
+  --w-midnight-40:    rgba(10, 3, 34, 0.40);
+  --w-midnight-30:    rgba(10, 3, 34, 0.30);
+  --w-midnight-10:    rgba(10, 3, 34, 0.10);
+
+  /* Accents (in brand-guide order) */
+  --w-clementine:     #FB7928;
+  --w-raspberry:      #F72149;
+  --w-orchid:         #D373B3;
+  --w-pink:           #EEA0EE;
+  --w-sky:            #ADE0EB;
+  --w-cobalt:         #2145F7;
+  --w-hunter:         #58BF3D;
+  --w-limon:          #BCE107;
+
+  /* ── Legacy aliases — keep old class names working while we migrate ── */
+  --w-ink:        var(--w-midnight);
+  --w-ink-90:     var(--w-midnight-90);
+  --w-ink-60:     var(--w-midnight-60);
+  --w-ink-40:     var(--w-midnight-40);
+  --w-ink-30:     var(--w-midnight-30);
+  --w-ink-10:     var(--w-midnight-10);
+  --w-chalk:      var(--w-warm-white);
+  --w-cream:      var(--w-warmer-white);
+  --w-sunny:      var(--w-canary);
+  --w-sunny-shadow: var(--w-canary-shadow);
+  --w-bubblegum:  var(--w-pink);
+  --w-lime:       var(--w-limon);
+  --w-crimson:    var(--w-raspberry);
+  --w-electric:   var(--w-cobalt);
+  --w-orange:     var(--w-clementine);
+
+  /* ─── Semantic surfaces ────────────────────────────────────── */
+  --surface-bg:       var(--w-chalk);
+  --surface-paper:    var(--w-cream);
+  --surface-hero:     var(--w-sunny);
+  --surface-dark:     var(--w-ink);
+  --surface-accent:   var(--w-sky);
+
+  /* ─── Semantic text ────────────────────────────────────────── */
+  --fg-1:             var(--w-ink);       /* primary text */
+  --fg-2:             var(--w-ink-60);    /* secondary / captions */
+  --fg-3:             var(--w-ink-40);    /* tertiary / page labels */
+  --fg-on-dark:       var(--w-chalk);     /* on navy */
+  --fg-on-sunny:      var(--w-ink);       /* on yellow */
+
+  /* ─── Font stacks ──────────────────────────────────────────── */
+  --font-display:     "Weekend Repro", "Host Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-body:        "Weekend Repro", "Host Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-playful:     "Karl ST", "Nunito", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-stat:        "GT Super Text", "STIX Two Text", Georgia, serif;
+
+  /* ─── Type scale (px values; letter-spacing and line-height follow Figma) ── */
+  /* Hero / section covers */
+  --fs-hero:          120px;   --lh-hero:   1;    --ls-hero:   -0.05em;
+  /* Section headers, marquee */
+  --fs-display:       80px;    --lh-display: 0.95; --ls-display: -0.045em;
+  /* Large body / editorial */
+  --fs-xl:            44px;    --lh-xl:     1.05;  --ls-xl:     -0.035em;
+  /* Mid headings */
+  --fs-lg:            25px;    --lh-lg:     1.1;   --ls-lg:     -0.04em;
+  /* Default body */
+  --fs-md:            16px;    --lh-md:     1.2;   --ls-md:     -0.02em;
+  /* Caption / meta */
+  --fs-sm:            14px;    --lh-sm:     1.2;   --ls-sm:     -0.01em;
+  /* Label / ALL-CAPS tag */
+  --fs-xs:            10.8px;  --lh-xs:     1;     --ls-xs:     0.04em;
+
+  /* ─── Radii ────────────────────────────────────────────────── */
+  --r-0:              0px;     /* tight editorial blocks — Weekend prefers sharp */
+  --r-xs:             2px;     /* pills / small tags */
+  --r-sm:             4px;     /* small cards / TikTok stickers */
+  --r-md:             12px;    /* app icon corners (medium-size) */
+  --r-lg:             22px;    /* iOS app icon corner */
+  --r-pill:           999px;
+
+  /* ─── Shadows ──────────────────────────────────────────────── */
+  /* Layered navy shadow system, sampled from Figma drop-shadow chains */
+  --shadow-soft:
+    0px 2px 4px rgba(10, 3, 34, 0.10),
+    0px 6px 8px rgba(10, 3, 34, 0.09),
+    0px 15px 11px rgba(10, 3, 34, 0.05);
+  --shadow-lifted:
+    0px 4px 8px rgba(10, 3, 34, 0.10),
+    0px 12px 24px rgba(10, 3, 34, 0.12);
+  --shadow-card:
+    0px 1px 2px rgba(10, 3, 34, 0.08),
+    0px 2px 4px rgba(10, 3, 34, 0.06);
+  --shadow-icon:
+    0.9px 1.4px 8px var(--w-sunny-shadow),
+    0.4px 0.8px 1.6px rgba(209, 168, 18, 0.18);
+  --shadow-inset-hint:
+    inset 0 1px 1px rgba(255, 255, 255, 0.35),
+    inset 0 2px 2px rgba(255, 255, 255, 0.25);
+  /* Inset "button" stamp from in-app UI (multiply + inner shadow) */
+  --shadow-inset-stamp:
+    inset 0 1px 1px rgba(10, 3, 34, 0.71);
+
+  /* ─── Motion ───────────────────────────────────────────────── */
+  --ease-standard:    cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-bounce:      cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast:         150ms;
+  --dur-med:          280ms;
+  --dur-slow:         520ms;
+
+  /* ─── Grid / spacing ───────────────────────────────────────── */
+  --g-1: 4px;  --g-2: 8px;  --g-3: 12px; --g-4: 16px;
+  --g-5: 20px; --g-6: 24px; --g-8: 32px; --g-10: 40px;
+  --g-12: 48px; --g-16: 64px; --g-20: 80px; --g-24: 96px;
+  --page-margin: 20px;         /* Figma brand-guide frames use a 20px outer gutter */
+  --gutter:      20px;         /* column gap */
+}
+
+/* ────────────────────────────────────────────────────────────────
+   Base / body
+   ─────────────────────────────────────────────────────────────── */
+html, body {
+  background: var(--surface-bg);
+  color: var(--fg-1);
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: var(--fs-md);
+  line-height: var(--lh-md);
+  letter-spacing: var(--ls-md);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   Semantic type classes (match to README naming)
+   ─────────────────────────────────────────────────────────────── */
+.t-hero, h1.hero {
+  font-family: var(--font-display); font-weight: 500;
+  font-size: var(--fs-hero); line-height: var(--lh-hero);
+  letter-spacing: var(--ls-hero); color: var(--fg-1);
+}
+.t-display, h1 {
+  font-family: var(--font-display); font-weight: 500;
+  font-size: var(--fs-display); line-height: var(--lh-display);
+  letter-spacing: var(--ls-display); color: var(--fg-1);
+}
+.t-xl, h2 {
+  font-family: var(--font-display); font-weight: 500;
+  font-size: var(--fs-xl); line-height: var(--lh-xl);
+  letter-spacing: var(--ls-xl);
+}
+.t-lg, h3 {
+  font-family: var(--font-display); font-weight: 500;
+  font-size: var(--fs-lg); line-height: var(--lh-lg);
+  letter-spacing: var(--ls-lg);
+}
+.t-md, p, li {
+  font-family: var(--font-body); font-weight: 500;
+  font-size: var(--fs-md); line-height: var(--lh-md);
+  letter-spacing: var(--ls-md);
+}
+.t-sm, .caption, small {
+  font-family: var(--font-body); font-weight: 500;
+  font-size: var(--fs-sm); line-height: var(--lh-sm);
+  letter-spacing: var(--ls-sm); color: var(--fg-2);
+}
+.t-label {
+  font-family: var(--font-display); font-weight: 700;
+  font-size: var(--fs-xs); line-height: var(--lh-xs);
+  letter-spacing: var(--ls-xs); text-transform: uppercase;
+}
+.t-playful {
+  font-family: var(--font-playful); font-weight: 500;
+  letter-spacing: -0.02em;
+}
+.t-stat, .t-serif {
+  font-family: var(--font-stat); font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   Utility
+   ─────────────────────────────────────────────────────────────── */
+.u-sunny  { background: var(--w-sunny); color: var(--w-ink); }
+.u-sky    { background: var(--w-sky);   color: var(--w-ink); }
+.u-cream  { background: var(--w-cream); color: var(--w-ink); }
+.u-chalk  { background: var(--w-chalk); color: var(--w-ink); }
+.u-ink    { background: var(--w-ink);   color: var(--w-chalk); }
+.u-bubble { background: var(--w-bubblegum); color: var(--w-ink); }
+.u-lime   { background: var(--w-lime);  color: var(--w-ink); }

@@ -1,0 +1,30 @@
+/* Weekend brand typefaces — slim subset used in this prototype */
+
+@font-face {
+  font-family: "Weekend Repro";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./WeekendRepro-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Weekend Repro";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./WeekendRepro-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Weekend Repro";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./WeekendRepro-Bold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "GT Super Text";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./GTSuperText-Book.woff2") format("woff2");
+}
