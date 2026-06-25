@@ -468,7 +468,7 @@
         <div class="kpi spend">
           <div class="label">2026 Marketing Spend</div>
           <div class="num" id="kpiSpend" style="color:#0A0322">&nbsp;</div>
-          <div class="sub" id="kpiSpendSub">Jan–Apr actuals + May–Dec modeled</div>
+          <div class="sub" id="kpiSpendSub">Jan–May actuals + Jun–Dec modeled</div>
         </div>
         <div class="kpi">
           <div class="label">Blended CAC <span class="ctr">current Q</span></div>
@@ -587,7 +587,7 @@
 // Growth Scenario Modeler — app logic + model stub
 
 // ----- Date utilities --------------------------------------------------
-const START = new Date('2026-05-04T00:00:00');
+const START = new Date('2026-06-15T00:00:00');
 const END   = new Date('2027-03-30T00:00:00');
 function buildWeeks() {
   const out = [];
@@ -650,13 +650,13 @@ const PLATFORM_COLORS = {
 // Informational only — the cohort engine derives starting state from legacy
 // cohort history bundled in ENGINE_DATA (see below).
 const STARTING_SUBS = {
-  FireTV:  68802,
-  Roku:    71339,
-  LG:       3256,
-  Samsung:  2676,
-  Web:        147,
+  FireTV:  68519,
+  Roku:    67758,
+  LG:       4321,
+  Samsung:  4137,
+  Web:         6,
 };
-const BASE_PRICE_MONTHLY = 12.99;  // Uniform across platforms; Price Increase adds +$1
+const BASE_PRICE_MONTHLY = 12.99;  // base ARPU; the Price Increase toggle raises NEW subs to $14.99 (+$2)
 
 // Defaults: most recent observed state (April 2026 run-rate) carried forward,
 // representing the "do nothing different" trajectory. Spend in $M/quarter
@@ -666,16 +666,14 @@ const BASE_PRICE_MONTHLY = 12.99;  // Uniform across platforms; Price Increase a
 // Web spend follows the post-launch ramp ($100k → $500k/mo); the Universal
 // Checkout toggle gates whether any of it actually fires.
 const DEFAULT_PLATFORM_STATE = {
-  FireTV:  { spend: { q2_26: 3.0, q3_26: 4.0, q4_26: 5.5, q1_27: 4.0 }, cpa: 133, m6: 0.49 },
-  Roku:    { spend: { q2_26: 1.9, q3_26: 2.7, q4_26: 4.0, q1_27: 3.0 }, cpa:  55, m6: 0.32 },
-  LG:      { spend: { q2_26: 0.2, q3_26: 0.5, q4_26: 0.5, q1_27: 0.5 }, cpa:  80, m6: 0.33 },
-  Samsung: { spend: { q2_26: 0.2, q3_26: 0.5, q4_26: 0.5, q1_27: 0.5 }, cpa:  80, m6: 0.35 },
-  Web:     { spend: { q2_26: 0.4, q3_26: 1.0, q4_26: 1.5, q1_27: 1.5 }, cpa: 200, m6: 0.32 },
+  FireTV:  { spend: { q2_26: 1.9, q3_26: 2.0, q4_26: 2.5, q1_27: 2.0 }, cpa: 106, m6: 0.519 },
+  Roku:    { spend: { q2_26: 2.2, q3_26: 1.5, q4_26: 2.0, q1_27: 2.0 }, cpa:  68, m6: 0.367 },
+  LG:      { spend: { q2_26: 0.4, q3_26: 0.4, q4_26: 0.4, q1_27: 0.4 }, cpa: 108, m6: 0.429 },
+  Samsung: { spend: { q2_26: 0.4, q3_26: 0.4, q4_26: 0.4, q1_27: 0.4 }, cpa:  96, m6: 0.384 },
+  Web:     { spend: { q2_26: 0.0, q3_26: 0.5, q4_26: 1.5, q1_27: 3.0 }, cpa:  70, m6: 0.323 },
 };
 // Q1 2026 qualified-CPA per platform — referenced by FireTV "snap to Q1" toggle
 const Q1_QUALIFIED_CPA = { FireTV: 101, Roku: 52, LG: 53, Samsung: 47, Web: 70 };
-// Universal Checkout post-launch Web CPA (drops from $200 unlaunched → $70)
-const WEB_CPA_POST_UC = 70;
 // Seasonal Boost — flat organic Christmas lift, distributed per-week across December
 const SEASONAL_BOOST_DECEMBER = { FireTV: 6000, Roku: 6000, LG: 1500, Samsung: 1500, Web: 0 };
 
@@ -685,28 +683,24 @@ const SEASONAL_BOOST_DECEMBER = { FireTV: 6000, Roku: 6000, LG: 1500, Samsung: 1
 // LTV scales by the ratio of (new 3Y retention sum) / (default 3Y retention sum),
 // so retention improvements still flow through to LTV:CAC. Gross = revenue-based;
 // Net = after platform / payment / support costs.
-const LTV_GROSS_3Y = { FireTV: 149, Roku: 105, LG: 120, Samsung: 120, Web: 120 };
-const LTV_NET_3Y   = { FireTV: 115, Roku:  77, LG: 103, Samsung: 103, Web: 103 };
+const LTV_GROSS_3Y = { FireTV: 146.6, Roku: 97.8, LG: 102.4, Samsung: 121.5, Web: 115.0 };
+const LTV_NET_3Y   = { FireTV: 124.6, Roku: 68.4, LG: 96.4, Samsung: 99.8, Web: 96.7 };
 
 // Jan–Apr 2026 actual marketing spend, including LG/Samsung partner commitments.
 // Used in the "2026 Marketing Spend" KPI, which sums these historicals plus the
 // modeled May–Dec spend coming out of computeModel().
-const JAN_APR_2026_ACTUAL_SPEND = {
-  // FireTV   Roku       LG (var)  Samsung   LG part   SamPart   Web
-  Jan: 1421819 + 859882 +  77578 + 103412 + 214872 + 145832 +     0,  // 2,823,395
-  Feb: 1198660 + 741001 +  30139 +  15358 + 214872 + 145832 + 30852,  // 2,376,714
-  Mar: 1483874 + 528301 +  62649 +  11490 + 214872 + 145832 + 27281,  // 2,474,299
-  Apr:  599644 + 549123 +  25115 +  11433 + 214872 + 145832 +     0,  // 1,546,019
+const JAN_MAY_2026_ACTUAL_SPEND = {
+  // Device-platform spend incl. LG/Samsung partner commitments; excludes Alexa. Source: Hex spend_data_by_day.
+  Jan: 2836721, Feb: 2356537, Mar: 2459762, Apr: 1509002, May: 1728970,
 };
-const JAN_APR_2026_ACTUAL_TOTAL =
-  JAN_APR_2026_ACTUAL_SPEND.Jan + JAN_APR_2026_ACTUAL_SPEND.Feb +
-  JAN_APR_2026_ACTUAL_SPEND.Mar + JAN_APR_2026_ACTUAL_SPEND.Apr;
+const JAN_MAY_2026_ACTUAL_TOTAL =
+  JAN_MAY_2026_ACTUAL_SPEND.Jan + JAN_MAY_2026_ACTUAL_SPEND.Feb + JAN_MAY_2026_ACTUAL_SPEND.Mar +
+  JAN_MAY_2026_ACTUAL_SPEND.Apr + JAN_MAY_2026_ACTUAL_SPEND.May;
 
 const TOGGLES = [
   { id: 'firetvFlow',        name: 'FireTV Conversion Flow Changes',      desc: 'FireTV CPA snaps back to Q1',     mech: 'FireTV CPA snaps back to its Q1 2026 qualified baseline of $101. (Today’s default reflects April’s degraded $133.)' },
-  { id: 'rokuMP',            name: 'Roku Multiplatform Ships',            desc: '+8pp M6 retention on Roku',       mech: 'Adds 8 percentage points to Roku\u2019s month-6 retention rate.' },
-  { id: 'priceIncrease',     name: 'Price Increase',                       desc: '+$1/mo new subs (all platforms)', mech: 'New subscribers across all platforms pay an additional $1/month. Magnitude adjustable on the Global tab.' },
-  { id: 'universalCheckout', name: 'Universal Checkout Ships',             desc: 'Web product launches',            mech: 'Enables Web acquisition from the chosen start month forward. Web spend is zero until then. Web CPA, retention, and quarterly spend are set on the Web tab.' },
+  { id: 'rokuMP',            name: 'Roku Multiplatform Ships',            desc: '+4pp M6 retention on Roku',       mech: 'Adds 4 percentage points to Roku\u2019s month-6 retention rate.' },
+  { id: 'priceIncrease',     name: 'Price Increase',                       desc: '$12.99 → $14.99 on new subs',  mech: 'New subscribers pay $14.99 instead of $12.99 (+$2/mo), from the chosen start month onward; existing subs grandfathered. Magnitude adjustable on the Global tab.' },
   { id: 'wofLaunch',         name: 'WoF Multiplatform Launch',             desc: '+3pp M6 on FireTV, LG, Samsung',  mech: 'Adds 3 percentage points to month-6 retention on FireTV, LG and Samsung.' },
   { id: 'aysLaunch',         name: 'AYS Multiplatform Launch',             desc: '+2pp M6 on FireTV, LG, Samsung',  mech: 'Adds 2 percentage points to month-6 retention on FireTV, LG and Samsung.' },
   { id: 'rokuCPAv2',         name: 'Roku CPAv2 Launch',                    desc: '+50% marketing spend on Roku',    mech: 'Multiplies all Roku quarterly spend by 1.5x.' },
@@ -730,7 +724,7 @@ const state = {
   // Each toggle has a "starts in month" — until that week, the toggle has no effect.
   toggleStart: defaultToggleStarts(),
   platforms: JSON.parse(JSON.stringify(DEFAULT_PLATFORM_STATE)),
-  global: { priceIncrease: 1.0 },
+  global: { priceIncrease: 2.0 },
   activeTab: 'FireTV',
   snapshots: [],
 };
@@ -742,7 +736,7 @@ const SNAPSHOT_COLORS = ['#D373B3', '#58BF3D', '#FB7928', '#ADE0EB', '#BCE107', 
 // platform margins, partner commitments. Calibrated so the model
 // reconciles to actual May 1 2026 active subscribers per platform.
 // =====================================================================
-const ENGINE_DATA = JSON.parse('{"curves":{"FireTV":{"b":8.786920849591578,"c":1.2390541322866802,"lambda":0.009909651379776238},"Roku":{"b":6.008848611944746,"c":1.398021976561711,"lambda":0.030376560516986912},"LG":{"b":2.30925081506704,"c":0.6239208427236738,"lambda":0.0516756437230688},"Samsung":{"b":11.572881135282575,"c":2.482977935246293,"lambda":0.0},"Web":{"b":6.202715818181458,"c":1.4052747480854813,"lambda":0.029956587219905538}},"platforms":["FireTV","Roku","LG","Samsung","Web"],"price_default":12.99,"margins_default":{"FireTV":0.77,"Roku":0.72,"LG":0.8,"Samsung":0.8,"Web":0.8},"partner_commit":{"LG":214872,"Samsung":145832},"qual_rate":{"FireTV":0.7672,"Roku":0.9077,"LG":1.0,"Samsung":0.9330,"Web":0.9665},"legacy_cohorts":{"FireTV":[{"date":"2025-01-06","size":267.77},{"date":"2025-01-13","size":153.45},{"date":"2025-01-20","size":710.46},{"date":"2025-01-27","size":738.85},{"date":"2025-02-03","size":1212.24},{"date":"2025-02-10","size":1182.32},{"date":"2025-02-17","size":1515.30},{"date":"2025-02-24","size":1131.68},{"date":"2025-03-03","size":1076.44},{"date":"2025-03-10","size":1519.13},{"date":"2025-03-17","size":1610.43},{"date":"2025-03-24","size":1602.76},{"date":"2025-03-31","size":1552.12},{"date":"2025-04-07","size":1937.28},{"date":"2025-04-14","size":1918.10},{"date":"2025-04-21","size":1842.91},{"date":"2025-04-28","size":1408.65},{"date":"2025-05-05","size":1424.76},{"date":"2025-05-12","size":1507.62},{"date":"2025-05-19","size":1469.26},{"date":"2025-05-26","size":1071.83},{"date":"2025-06-02","size":984.37},{"date":"2025-06-09","size":1143.19},{"date":"2025-06-16","size":1066.46},{"date":"2025-06-23","size":1200.73},{"date":"2025-06-30","size":1273.62},{"date":"2025-07-07","size":872.35},{"date":"2025-07-14","size":1128.61},{"date":"2025-07-21","size":1354.18},{"date":"2025-07-28","size":1011.99},{"date":"2025-08-04","size":1031.17},{"date":"2025-08-11","size":1105.59},{"date":"2025-08-18","size":1287.43},{"date":"2025-08-25","size":1430.13},{"date":"2025-09-01","size":1031.94},{"date":"2025-09-08","size":1433.20},{"date":"2025-09-15","size":1073.37},{"date":"2025-09-22","size":692.05},{"date":"2025-09-29","size":899.97},{"date":"2025-10-06","size":1379.50},{"date":"2025-10-13","size":2700.68},{"date":"2025-10-20","size":3833.13},{"date":"2025-10-27","size":3021.39},{"date":"2025-11-03","size":2702.22},{"date":"2025-11-10","size":2446.73},{"date":"2025-11-17","size":3491.70},{"date":"2025-11-24","size":2551.07},{"date":"2025-12-01","size":2897.09},{"date":"2025-12-08","size":2373.07},{"date":"2025-12-15","size":2674.60},{"date":"2025-12-22","size":2523.45},{"date":"2025-12-29","size":4050.25},{"date":"2026-01-05","size":5713.63},{"date":"2026-01-12","size":3390.43},{"date":"2026-01-19","size":2145.20},{"date":"2026-01-26","size":2005.56},{"date":"2026-02-02","size":3846.17},{"date":"2026-02-09","size":2451.33},{"date":"2026-02-16","size":3224.71},{"date":"2026-02-23","size":3151.82},{"date":"2026-03-02","size":3390.43},{"date":"2026-03-09","size":4608.80},{"date":"2026-03-16","size":3269.97},{"date":"2026-03-23","size":2427.54},{"date":"2026-03-30","size":1168.50},{"date":"2026-04-06","size":1234.49},{"date":"2026-04-13","size":1436.27},{"date":"2026-04-20","size":855.47},{"date":"2026-04-27","size":966.72}],"Roku":[{"date":"2025-01-06","size":2496.16},{"date":"2025-01-13","size":3022.62},{"date":"2025-01-20","size":1949.73},{"date":"2025-01-27","size":2479.82},{"date":"2025-02-03","size":2433.53},{"date":"2025-02-10","size":2910.07},{"date":"2025-02-17","size":2174.84},{"date":"2025-02-24","size":2227.48},{"date":"2025-03-03","size":2677.70},{"date":"2025-03-10","size":2753.04},{"date":"2025-03-17","size":2156.68},{"date":"2025-03-24","size":1895.27},{"date":"2025-03-31","size":1612.07},{"date":"2025-04-07","size":2046.85},{"date":"2025-04-14","size":2694.04},{"date":"2025-04-21","size":2803.87},{"date":"2025-04-28","size":3248.64},{"date":"2025-05-05","size":3665.27},{"date":"2025-05-12","size":2424.45},{"date":"2025-05-19","size":2219.31},{"date":"2025-05-26","size":2541.54},{"date":"2025-06-02","size":2133.99},{"date":"2025-06-09","size":2106.76},{"date":"2025-06-16","size":4012.01},{"date":"2025-06-23","size":1907.07},{"date":"2025-06-30","size":1353.37},{"date":"2025-07-07","size":1221.76},{"date":"2025-07-14","size":1669.25},{"date":"2025-07-21","size":2723.99},{"date":"2025-07-28","size":2154.87},{"date":"2025-08-04","size":1662.90},{"date":"2025-08-11","size":1795.42},{"date":"2025-08-18","size":2795.70},{"date":"2025-08-25","size":3011.73},{"date":"2025-09-01","size":2950.01},{"date":"2025-09-08","size":2493.44},{"date":"2025-09-15","size":2015.99},{"date":"2025-09-22","size":2177.56},{"date":"2025-09-29","size":2286.48},{"date":"2025-10-06","size":2035.96},{"date":"2025-10-13","size":2627.77},{"date":"2025-10-20","size":3032.61},{"date":"2025-10-27","size":2829.28},{"date":"2025-11-03","size":3752.41},{"date":"2025-11-10","size":4451.33},{"date":"2025-11-17","size":4700.04},{"date":"2025-11-24","size":4987.78},{"date":"2025-12-01","size":5756.60},{"date":"2025-12-08","size":4565.70},{"date":"2025-12-15","size":4396.87},{"date":"2025-12-22","size":5005.03},{"date":"2025-12-29","size":6490.92},{"date":"2026-01-05","size":3612.62},{"date":"2026-01-12","size":3041.68},{"date":"2026-01-19","size":3371.18},{"date":"2026-01-26","size":4133.64},{"date":"2026-02-02","size":3972.98},{"date":"2026-02-09","size":3088.88},{"date":"2026-02-16","size":3127.91},{"date":"2026-02-23","size":3263.16},{"date":"2026-03-02","size":2608.71},{"date":"2026-03-09","size":2200.25},{"date":"2026-03-16","size":2657.73},{"date":"2026-03-23","size":2788.44},{"date":"2026-03-30","size":3099.78},{"date":"2026-04-06","size":2458.94},{"date":"2026-04-13","size":1877.11},{"date":"2026-04-20","size":2576.04},{"date":"2026-04-27","size":3006.28}],"LG":[{"date":"2025-01-06","size":40},{"date":"2025-01-13","size":31},{"date":"2025-01-20","size":16},{"date":"2025-01-27","size":23},{"date":"2025-02-03","size":26},{"date":"2025-02-10","size":23},{"date":"2025-02-17","size":26},{"date":"2025-02-24","size":28},{"date":"2025-03-03","size":14},{"date":"2025-03-10","size":13},{"date":"2025-03-17","size":11},{"date":"2025-03-24","size":7},{"date":"2025-03-31","size":6},{"date":"2025-04-07","size":8},{"date":"2025-04-14","size":3},{"date":"2025-04-21","size":7},{"date":"2025-04-28","size":6},{"date":"2025-05-05","size":5},{"date":"2025-05-12","size":8},{"date":"2025-05-19","size":2},{"date":"2025-05-26","size":2},{"date":"2025-06-02","size":3},{"date":"2025-06-09","size":2},{"date":"2025-06-16","size":6},{"date":"2025-06-23","size":4},{"date":"2025-06-30","size":4},{"date":"2025-07-07","size":8},{"date":"2025-07-14","size":2},{"date":"2025-07-21","size":5},{"date":"2025-07-28","size":0},{"date":"2025-08-04","size":3},{"date":"2025-08-11","size":4},{"date":"2025-08-18","size":3},{"date":"2025-08-25","size":6},{"date":"2025-09-01","size":4},{"date":"2025-09-08","size":5},{"date":"2025-09-15","size":3},{"date":"2025-09-22","size":3},{"date":"2025-09-29","size":0},{"date":"2025-10-06","size":0},{"date":"2025-10-13","size":2},{"date":"2025-10-20","size":2},{"date":"2025-10-27","size":2},{"date":"2025-11-03","size":2},{"date":"2025-11-10","size":2},{"date":"2025-11-17","size":5},{"date":"2025-11-24","size":36},{"date":"2025-12-01","size":200},{"date":"2025-12-08","size":266},{"date":"2025-12-15","size":128},{"date":"2025-12-22","size":122},{"date":"2025-12-29","size":500},{"date":"2026-01-05","size":487},{"date":"2026-01-12","size":201},{"date":"2026-01-19","size":190},{"date":"2026-01-26","size":209},{"date":"2026-02-02","size":185},{"date":"2026-02-09","size":185},{"date":"2026-02-16","size":226},{"date":"2026-02-23","size":201},{"date":"2026-03-02","size":151},{"date":"2026-03-09","size":152},{"date":"2026-03-16","size":247},{"date":"2026-03-23","size":407},{"date":"2026-03-30","size":387},{"date":"2026-04-06","size":224},{"date":"2026-04-13","size":172},{"date":"2026-04-20","size":119},{"date":"2026-04-27","size":216}],"Samsung":[{"date":"2025-11-10","size":2.80},{"date":"2025-11-17","size":41.05},{"date":"2025-11-24","size":92.36},{"date":"2025-12-01","size":174.47},{"date":"2025-12-08","size":121.29},{"date":"2025-12-15","size":59.71},{"date":"2025-12-22","size":18.66},{"date":"2025-12-29","size":29.85},{"date":"2026-01-05","size":202.45},{"date":"2026-01-12","size":274.29},{"date":"2026-01-19","size":428.23},{"date":"2026-01-26","size":387.18},{"date":"2026-02-02","size":229.51},{"date":"2026-02-09","size":203.39},{"date":"2026-02-16","size":208.05},{"date":"2026-02-23","size":241.64},{"date":"2026-03-02","size":166.07},{"date":"2026-03-09","size":107.29},{"date":"2026-03-16","size":142.74},{"date":"2026-03-23","size":111.02},{"date":"2026-03-30","size":97.03},{"date":"2026-04-06","size":146.48},{"date":"2026-04-13","size":144.61},{"date":"2026-04-20","size":122.22},{"date":"2026-04-27","size":339.60}],"Web":[{"date":"2025-09-22","size":0},{"date":"2025-09-29","size":0},{"date":"2025-10-06","size":0},{"date":"2025-10-13","size":0},{"date":"2025-10-20","size":0},{"date":"2025-10-27","size":0},{"date":"2025-11-10","size":0},{"date":"2025-11-17","size":0},{"date":"2025-11-24","size":0.97},{"date":"2025-12-01","size":6.77},{"date":"2025-12-08","size":1.93},{"date":"2025-12-15","size":1.93},{"date":"2025-12-22","size":1.93},{"date":"2025-12-29","size":1.93},{"date":"2026-01-05","size":4.83},{"date":"2026-01-12","size":7.73},{"date":"2026-01-19","size":2.90},{"date":"2026-01-26","size":0.97},{"date":"2026-02-02","size":4.83},{"date":"2026-02-09","size":0.97},{"date":"2026-02-16","size":4.83},{"date":"2026-02-23","size":2.90},{"date":"2026-03-02","size":1.93},{"date":"2026-03-09","size":0.97},{"date":"2026-03-16","size":2.90},{"date":"2026-03-23","size":0.97},{"date":"2026-03-30","size":2.90},{"date":"2026-04-06","size":0.97},{"date":"2026-04-13","size":1.93},{"date":"2026-04-20","size":4.83},{"date":"2026-04-27","size":103.41}]},"anchor_iso":"2026-05-01","end_iso":"2027-03-31","target_eoy_arr":60000000}');
+const ENGINE_DATA = JSON.parse('{"curves":{"FireTV":{"b":8.786921,"c":1.145856,"lambda":0.00991},"Roku":{"b":1.982692,"c":0.561724,"lambda":0.036669},"LG":{"b":2.309251,"c":0.418795,"lambda":0.051676},"Samsung":{"b":11.572881,"c":2.29143,"lambda":0.0},"Web":{"b":6.202716,"c":1.404468,"lambda":0.029957}},"platforms":["FireTV","Roku","LG","Samsung","Web"],"price_default":12.99,"margins_default":{"FireTV":0.85,"Roku":0.7,"LG":0.9419,"Samsung":0.821,"Web":0.8409},"partner_commit":{"LG":214272,"Samsung":145833},"qual_rate":{"FireTV":1.0,"Roku":1.0,"LG":1.0,"Samsung":1.0,"Web":1.0},"legacy_cohorts":{"FireTV":[{"date":"2025-01-06","size":250.728},{"date":"2025-01-13","size":143.684},{"date":"2025-01-20","size":665.246},{"date":"2025-01-27","size":691.829},{"date":"2025-02-03","size":1135.092},{"date":"2025-02-10","size":1107.077},{"date":"2025-02-17","size":1418.865},{"date":"2025-02-24","size":1059.66},{"date":"2025-03-03","size":1007.935},{"date":"2025-03-10","size":1422.452},{"date":"2025-03-17","size":1507.942},{"date":"2025-03-24","size":1500.76},{"date":"2025-03-31","size":1453.343},{"date":"2025-04-07","size":1813.992},{"date":"2025-04-14","size":1796.032},{"date":"2025-04-21","size":1725.626},{"date":"2025-04-28","size":1319.003},{"date":"2025-05-05","size":1334.088},{"date":"2025-05-12","size":1411.675},{"date":"2025-05-19","size":1375.757},{"date":"2025-05-26","size":1003.618},{"date":"2025-06-02","size":921.724},{"date":"2025-06-09","size":1070.437},{"date":"2025-06-16","size":998.59},{"date":"2025-06-23","size":1124.315},{"date":"2025-06-30","size":1192.566},{"date":"2025-07-07","size":816.833},{"date":"2025-07-14","size":1056.786},{"date":"2025-07-21","size":1267.999},{"date":"2025-07-28","size":947.587},{"date":"2025-08-04","size":965.546},{"date":"2025-08-11","size":1035.23},{"date":"2025-08-18","size":1205.498},{"date":"2025-08-25","size":1339.116},{"date":"2025-09-01","size":966.267},{"date":"2025-09-08","size":1341.991},{"date":"2025-09-15","size":1005.061},{"date":"2025-09-22","size":648.009},{"date":"2025-09-29","size":842.696},{"date":"2025-10-06","size":1291.708},{"date":"2025-10-13","size":2528.808},{"date":"2025-10-20","size":3589.189},{"date":"2025-10-27","size":2829.108},{"date":"2025-11-03","size":2530.251},{"date":"2025-11-10","size":2291.02},{"date":"2025-11-17","size":3269.488},{"date":"2025-11-24","size":2388.72},{"date":"2025-12-01","size":2712.719},{"date":"2025-12-08","size":2222.047},{"date":"2025-12-15","size":2504.388},{"date":"2025-12-22","size":2362.857},{"date":"2025-12-29","size":3792.491},{"date":"2026-01-05","size":5350.014},{"date":"2026-01-12","size":3174.662},{"date":"2026-01-19","size":2008.679},{"date":"2026-01-26","size":1877.926},{"date":"2026-02-02","size":3601.399},{"date":"2026-02-09","size":2295.327},{"date":"2026-02-16","size":3019.489},{"date":"2026-02-23","size":2951.238},{"date":"2026-03-02","size":3704.586},{"date":"2026-03-09","size":5013.111},{"date":"2026-03-16","size":3569.596},{"date":"2026-03-23","size":2571.329},{"date":"2026-03-30","size":1107.13},{"date":"2026-04-06","size":1467.464},{"date":"2026-04-13","size":1501.212},{"date":"2026-04-20","size":811.024},{"date":"2026-04-27","size":988.47},{"date":"2026-05-04","size":1421.742},{"date":"2026-05-11","size":1988.915},{"date":"2026-05-18","size":1608.986},{"date":"2026-05-25","size":1451.135},{"date":"2026-06-01","size":1632.935},{"date":"2026-06-08","size":1659.062}],"Roku":[{"date":"2025-01-06","size":2038.246},{"date":"2025-01-13","size":2468.129},{"date":"2025-01-20","size":1592.058},{"date":"2025-01-27","size":2024.904},{"date":"2025-02-03","size":1987.106},{"date":"2025-02-10","size":2376.226},{"date":"2025-02-17","size":1775.872},{"date":"2025-02-24","size":1818.855},{"date":"2025-03-03","size":2186.484},{"date":"2025-03-10","size":2248.003},{"date":"2025-03-17","size":1761.043},{"date":"2025-03-24","size":1547.588},{"date":"2025-03-31","size":1316.34},{"date":"2025-04-07","size":1671.361},{"date":"2025-04-14","size":2199.827},{"date":"2025-04-21","size":2289.508},{"date":"2025-04-28","size":2652.686},{"date":"2025-05-05","size":2992.887},{"date":"2025-05-12","size":1979.692},{"date":"2025-05-19","size":1812.184},{"date":"2025-05-26","size":2075.302},{"date":"2025-06-02","size":1742.516},{"date":"2025-06-09","size":1720.28},{"date":"2025-06-16","size":3276.018},{"date":"2025-06-23","size":1557.224},{"date":"2025-06-30","size":1105.098},{"date":"2025-07-07","size":997.632},{"date":"2025-07-14","size":1363.031},{"date":"2025-07-21","size":2224.282},{"date":"2025-07-28","size":1759.566},{"date":"2025-08-04","size":1357.846},{"date":"2025-08-11","size":1466.056},{"date":"2025-08-18","size":2282.837},{"date":"2025-08-25","size":2459.237},{"date":"2025-09-01","size":2408.839},{"date":"2025-09-08","size":2036.026},{"date":"2025-09-15","size":1646.162},{"date":"2025-09-22","size":1778.093},{"date":"2025-09-29","size":1867.033},{"date":"2025-10-06","size":1662.469},{"date":"2025-10-13","size":2145.713},{"date":"2025-10-20","size":2476.286},{"date":"2025-10-27","size":2310.257},{"date":"2025-11-03","size":3064.042},{"date":"2025-11-10","size":3634.747},{"date":"2025-11-17","size":3837.831},{"date":"2025-11-24","size":4072.786},{"date":"2025-12-01","size":4700.568},{"date":"2025-12-08","size":3728.135},{"date":"2025-12-15","size":3590.277},{"date":"2025-12-22","size":4086.871},{"date":"2025-12-29","size":5300.179},{"date":"2026-01-05","size":2949.895},{"date":"2026-01-12","size":2483.693},{"date":"2026-01-19","size":2752.747},{"date":"2026-01-26","size":3375.336},{"date":"2026-02-02","size":3244.149},{"date":"2026-02-09","size":2522.234},{"date":"2026-02-16","size":2554.104},{"date":"2026-02-23","size":2664.542},{"date":"2026-03-02","size":2537.689},{"date":"2026-03-09","size":2131.365},{"date":"2026-03-16","size":2697.279},{"date":"2026-03-23","size":2789.673},{"date":"2026-03-30","size":3127.752},{"date":"2026-04-06","size":2330.852},{"date":"2026-04-13","size":1773.338},{"date":"2026-04-20","size":2639.533},{"date":"2026-04-27","size":3031.158},{"date":"2026-05-04","size":2813.822},{"date":"2026-05-11","size":2284.655},{"date":"2026-05-18","size":2967.112},{"date":"2026-05-25","size":3294.691},{"date":"2026-06-01","size":2756.075},{"date":"2026-06-08","size":2590.186}],"LG":[{"date":"2025-01-06","size":43.843},{"date":"2025-01-13","size":33.979},{"date":"2025-01-20","size":17.537},{"date":"2025-01-27","size":25.21},{"date":"2025-02-03","size":28.498},{"date":"2025-02-10","size":25.21},{"date":"2025-02-17","size":28.498},{"date":"2025-02-24","size":30.69},{"date":"2025-03-03","size":15.344},{"date":"2025-03-10","size":14.248},{"date":"2025-03-17","size":12.057},{"date":"2025-03-24","size":7.673},{"date":"2025-03-31","size":6.576},{"date":"2025-04-07","size":8.768},{"date":"2025-04-14","size":3.288},{"date":"2025-04-21","size":7.673},{"date":"2025-04-28","size":6.576},{"date":"2025-05-05","size":5.48},{"date":"2025-05-12","size":8.768},{"date":"2025-05-19","size":2.192},{"date":"2025-05-26","size":2.192},{"date":"2025-06-02","size":3.288},{"date":"2025-06-09","size":2.192},{"date":"2025-06-16","size":6.576},{"date":"2025-06-23","size":4.384},{"date":"2025-06-30","size":4.384},{"date":"2025-07-07","size":8.768},{"date":"2025-07-14","size":2.192},{"date":"2025-07-21","size":5.48},{"date":"2025-07-28","size":0.0},{"date":"2025-08-04","size":3.288},{"date":"2025-08-11","size":4.384},{"date":"2025-08-18","size":3.288},{"date":"2025-08-25","size":6.576},{"date":"2025-09-01","size":4.384},{"date":"2025-09-08","size":5.48},{"date":"2025-09-15","size":3.288},{"date":"2025-09-22","size":3.288},{"date":"2025-09-29","size":0.0},{"date":"2025-10-06","size":0.0},{"date":"2025-10-13","size":2.192},{"date":"2025-10-20","size":2.192},{"date":"2025-10-27","size":2.192},{"date":"2025-11-03","size":2.192},{"date":"2025-11-10","size":2.192},{"date":"2025-11-17","size":5.48},{"date":"2025-11-24","size":39.458},{"date":"2025-12-01","size":219.212},{"date":"2025-12-08","size":291.553},{"date":"2025-12-15","size":140.295},{"date":"2025-12-22","size":133.72},{"date":"2025-12-29","size":548.032},{"date":"2026-01-05","size":533.782},{"date":"2026-01-12","size":220.308},{"date":"2026-01-19","size":208.252},{"date":"2026-01-26","size":229.076},{"date":"2026-02-02","size":202.772},{"date":"2026-02-09","size":202.772},{"date":"2026-02-16","size":247.711},{"date":"2026-02-23","size":220.308},{"date":"2026-03-02","size":137.283},{"date":"2026-03-09","size":144.349},{"date":"2026-03-16","size":264.472},{"date":"2026-03-23","size":416.897},{"date":"2026-03-30","size":375.51},{"date":"2026-04-06","size":216.019},{"date":"2026-04-13","size":167.566},{"date":"2026-04-20","size":119.113},{"date":"2026-04-27","size":217.029},{"date":"2026-05-04","size":192.802},{"date":"2026-05-11","size":158.481},{"date":"2026-05-18","size":351.284},{"date":"2026-05-25","size":451.218},{"date":"2026-06-01","size":199.868},{"date":"2026-06-08","size":148.387}],"Samsung":[{"date":"2025-11-10","size":3.221},{"date":"2025-11-17","size":47.223},{"date":"2025-11-24","size":106.25},{"date":"2025-12-01","size":200.708},{"date":"2025-12-08","size":139.531},{"date":"2025-12-15","size":68.689},{"date":"2025-12-22","size":21.466},{"date":"2025-12-29","size":34.339},{"date":"2026-01-05","size":232.896},{"date":"2026-01-12","size":315.539},{"date":"2026-01-19","size":492.631},{"date":"2026-01-26","size":445.407},{"date":"2026-02-02","size":264.025},{"date":"2026-02-09","size":233.978},{"date":"2026-02-16","size":239.338},{"date":"2026-02-23","size":277.98},{"date":"2026-03-02","size":172.68},{"date":"2026-03-09","size":116.13},{"date":"2026-03-16","size":150.464},{"date":"2026-03-23","size":118.15},{"date":"2026-03-30","size":110.071},{"date":"2026-04-06","size":164.602},{"date":"2026-04-13","size":140.366},{"date":"2026-04-20","size":137.336},{"date":"2026-04-27","size":465.53},{"date":"2026-05-04","size":352.429},{"date":"2026-05-11","size":325.164},{"date":"2026-05-18","size":370.606},{"date":"2026-05-25","size":364.547},{"date":"2026-06-01","size":287.8},{"date":"2026-06-08","size":274.673}],"Web":[{"date":"2025-09-22","size":0.0},{"date":"2025-09-29","size":0.0},{"date":"2025-10-06","size":0.0},{"date":"2025-10-13","size":0.0},{"date":"2025-10-20","size":0.0},{"date":"2025-10-27","size":0.0},{"date":"2025-11-10","size":0.0},{"date":"2025-11-17","size":0.0},{"date":"2025-11-24","size":0.344},{"date":"2025-12-01","size":2.398},{"date":"2025-12-08","size":0.683},{"date":"2025-12-15","size":0.683},{"date":"2025-12-22","size":0.683},{"date":"2025-12-29","size":0.683},{"date":"2026-01-05","size":1.713},{"date":"2026-01-12","size":2.74},{"date":"2026-01-19","size":1.027},{"date":"2026-01-26","size":0.344},{"date":"2026-02-02","size":1.713},{"date":"2026-02-09","size":0.344},{"date":"2026-02-16","size":1.713},{"date":"2026-02-23","size":1.027},{"date":"2026-03-02","size":0.0},{"date":"2026-03-09","size":0.0},{"date":"2026-03-16","size":0.0},{"date":"2026-03-23","size":0.0},{"date":"2026-03-30","size":0.0},{"date":"2026-04-06","size":0.0},{"date":"2026-04-13","size":0.0},{"date":"2026-04-20","size":0.0},{"date":"2026-04-27","size":0.0},{"date":"2026-05-04","size":0.0},{"date":"2026-05-11","size":0.0},{"date":"2026-05-18","size":0.0},{"date":"2026-05-25","size":0.0},{"date":"2026-06-01","size":0.0},{"date":"2026-06-08","size":0.0}]},"anchor_iso":"2026-06-15","end_iso":"2027-03-31","target_eoy_arr":60000000}');
 
 // Pre-parse legacy cohort dates once and pre-compute their "age in months at week W"
 // for each modeled week. This keeps the hot per-slider recompute fast.
@@ -787,15 +781,12 @@ function computeModel(controlState) {
       let cpa = ps.cpa;
       let m6 = ps.m6;
       let spendMult = 1.0;
-      // Universal Checkout: gates Web spend entirely pre-trigger (zero acquisition
-      // before the toggle's start week), AND drops Web CPA from $200 (unlaunched
-      // baseline) to $70 (post-launch efficient state) once it's live.
+      // Universal Checkout has shipped: Web acquires directly from its own spend / CPA /
+      // M6 levers, ungated, like every other platform.
       let spendGate = 1.0;
-      if (p === 'Web' && !isActive('universalCheckout', w)) spendGate = 0.0;
-      if (p === 'Web' && isActive('universalCheckout', w))  cpa = WEB_CPA_POST_UC;
 
       if (isActive('firetvFlow', w) && p === 'FireTV')                                              cpa = Q1_QUALIFIED_CPA.FireTV;
-      if (isActive('rokuMP', w)     && p === 'Roku')                                                m6 = Math.min(0.98, m6 + 0.08);
+      if (isActive('rokuMP', w)     && p === 'Roku')                                                m6 = Math.min(0.98, m6 + 0.04);
       if (isActive('wofLaunch', w)  && (p === 'FireTV' || p === 'LG' || p === 'Samsung'))           m6 = Math.min(0.98, m6 + 0.03);
       if (isActive('aysLaunch', w)  && (p === 'FireTV' || p === 'LG' || p === 'Samsung'))           m6 = Math.min(0.98, m6 + 0.02);
       if (isActive('rokuCPAv2', w)  && p === 'Roku')                                                spendMult *= 1.50;
@@ -896,7 +887,7 @@ function computeModel(controlState) {
     lastEff = eff;
 
     const priceDelta = isActive('priceIncrease', w) ? controlState.global.priceIncrease : 0;
-    const newPrice = BASE_PRICE_MONTHLY + priceDelta;
+    const newPrice = BASE_PRICE_MONTHLY + priceDelta;  // Price Increase toggle adds priceDelta (+$2 -> $14.99) to new subs
 
     let weekSpendTotal = 0, weekNewTotal = 0;
 
@@ -1012,11 +1003,11 @@ function computeModel(controlState) {
 
   const eoyARR = weeklyARR[EOY_2026_IDX];
 
-  // 2026 annual marketing spend: Jan–Apr actuals + May–Dec modeled (weeks 0..EOY_2026_IDX).
+  // 2026 annual marketing spend: Jan–May actuals + Jun–Dec modeled (weeks 0..EOY_2026_IDX).
   // weeklyMarketingSpend already includes partner commitments.
   let modeledMaytoDec2026 = 0;
   for (let w = 0; w <= EOY_2026_IDX; w++) modeledMaytoDec2026 += weeklyMarketingSpend[w];
-  const annual2026MarketingSpend = JAN_APR_2026_ACTUAL_TOTAL + modeledMaytoDec2026;
+  const annual2026MarketingSpend = JAN_MAY_2026_ACTUAL_TOTAL + modeledMaytoDec2026;
 
   // Blended trailing-13-week CAC / LTV:CAC (net) / LTV:CAC (gross) around EoY 2026
   const startW = Math.max(0, EOY_2026_IDX - 12);
@@ -1046,7 +1037,7 @@ function computeModel(controlState) {
 const BASELINE = computeModel({
   toggles: Object.fromEntries(TOGGLES.map(t => [t.id, false])),
   platforms: JSON.parse(JSON.stringify(DEFAULT_PLATFORM_STATE)),
-  global: { priceIncrease: 1.0 },
+  global: { priceIncrease: 2.0 },
 });
 
 // =====================================================================
@@ -1221,7 +1212,7 @@ function buildLeversBody() {
       value: state.global.priceIncrease,
       fmt: v => dollarSign + v.toFixed(2),
       min: 0, max: 3, step: 0.25,
-      baseline: 1.0,
+      baseline: 2.0,
       suffix: '/mo',
       onInput: v => { state.global.priceIncrease = v; },
     }));
@@ -1417,7 +1408,7 @@ function render() {
   const spendKPI = m.kpis.annual2026MarketingSpend;
   qs('#kpiSpend').innerHTML = dollarSign + (spendKPI / 1e6).toFixed(1) + '<span class="unit">M</span>';
   const baseSpend = BASELINE.kpis.annual2026MarketingSpend;
-  qs('#kpiSpendSub').textContent = 'Jan\u2013Apr actuals (' + dollarSign + (JAN_APR_2026_ACTUAL_TOTAL/1e6).toFixed(1) + 'M) + May\u2013Dec modeled';
+  qs('#kpiSpendSub').textContent = 'Jan\u2013May actuals (' + dollarSign + (JAN_MAY_2026_ACTUAL_TOTAL/1e6).toFixed(1) + 'M) + Jun\u2013Dec modeled';
 
   qs('#kpiCac').textContent = dollarSign + Math.round(m.kpis.blendedCAC);
   const cacDelta = m.kpis.blendedCAC - BASELINE.kpis.blendedCAC;
@@ -1719,7 +1710,7 @@ function resetBaseline() {
   state.toggles = Object.fromEntries(TOGGLES.map(t => [t.id, false]));
   state.toggleStart = defaultToggleStarts();
   state.platforms = JSON.parse(JSON.stringify(DEFAULT_PLATFORM_STATE));
-  state.global = { priceIncrease: 1.0 };
+  state.global = { priceIncrease: 2.0 };
   buildToggles();
   buildLeversBody();
   render();
