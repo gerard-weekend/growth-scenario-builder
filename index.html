@@ -212,7 +212,7 @@
     width: 14px; height: 14px; border-radius: 999px;
     background: var(--card); border: 2px solid var(--accent); cursor: pointer;
   }
-  .quarter-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 2px; }
+  .quarter-grid, .bucket-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 2px; }
   .qcell { border: 1px solid var(--hairline); border-radius: 5px; padding: 7px 8px 8px; display: flex; flex-direction: column; gap: 5px; }
   .qcell .q { font-size: 9.5px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--w-midnight-40); font-weight: 700; }
   .qcell .v { font-size: 13px; font-weight: 500; letter-spacing: -0.015em; }
@@ -609,6 +609,37 @@ const WEEKS_IN_Q = (() => {
   WEEKS.forEach(d => c[quarterOf(d)]++);
   return c;
 })();
+
+// ----- Spend / CPA time buckets ------------------------------------------
+// Jul-Dec 2026 are modeled MONTH-BY-MONTH; Q1 2027 stays a single bucket.
+const BUCKETS = [
+  { id: 'jul_26', label: 'Jul 26' },
+  { id: 'aug_26', label: 'Aug 26' },
+  { id: 'sep_26', label: 'Sep 26' },
+  { id: 'oct_26', label: 'Oct 26' },
+  { id: 'nov_26', label: 'Nov 26' },
+  { id: 'dec_26', label: 'Dec 26' },
+  { id: 'q1_27', label: 'Q1 27' },
+];
+const BUCKET_IDS = BUCKETS.map(b => b.id);
+const MONTH_KEYS_26 = ['jul_26', 'aug_26', 'sep_26', 'oct_26', 'nov_26', 'dec_26'];
+function bucketOf(d) {
+  const y = d.getFullYear(), m = d.getMonth();
+  if (y === 2026 && m >= 6 && m <= 11) return MONTH_KEYS_26[m - 6];
+  return 'q1_27';  // Jan-Mar 2027 (and anything beyond)
+}
+const WEEKS_IN_BUCKET = (() => {
+  const c = {}; BUCKET_IDS.forEach(b => c[b] = 0);
+  WEEKS.forEach(d => c[bucketOf(d)]++);
+  return c;
+})();
+// Build per-platform bucket objects. bkspend() splits a quarterly $M figure evenly
+// across that quarter's three months; the Q1'27 figure is used whole. bkflat() sets
+// every bucket to the same value (used for the default flat CPA per platform).
+function bkspend(q3, q4, q1) {
+  return { jul_26: q3 / 3, aug_26: q3 / 3, sep_26: q3 / 3, oct_26: q4 / 3, nov_26: q4 / 3, dec_26: q4 / 3, q1_27: q1 };
+}
+function bkflat(v) { const o = {}; BUCKET_IDS.forEach(b => o[b] = v); return o; }
 const EOY_2026_IDX = (() => {
   const target = new Date('2026-12-31');
   let best = 0, bd = Infinity;
@@ -660,18 +691,21 @@ const STARTING_SUBS = {
 const BASE_PRICE_MONTHLY = 12.99;  // base ARPU; the Price Increase toggle raises NEW subs to $14.99 (+$2)
 
 // Defaults: latest observed state at the 2026-07-06 anchor carried forward,
-// representing the "do nothing different" trajectory. Spend in $M/quarter
+// representing the "do nothing different" trajectory. Spend is per bucket (see below)
 // (April monthly × 3). CPA is QUALIFIED — cost per real paid cohort entrant,
 // not gross signup cost — derived from April spend ÷ (April adds × qual rate).
 // Hazard-adjusted retention curves anchor the base to financial truth at 2026-07-06.
 // Web spend follows the post-launch ramp ($100k → $500k/mo); the Universal
 // Checkout toggle gates whether any of it actually fires.
+// Spend is MONTHLY ($M) for Jul-Dec 2026 with a single Q1'27 bucket; bkspend()
+// splits the prior quarterly plan evenly across each quarter's months. CPA is
+// likewise per-bucket (defaults flat per platform). M6 = fitted month-6 retention.
 const DEFAULT_PLATFORM_STATE = {
-  FireTV:  { spend: { q3_26: 2.0, q4_26: 2.5, q1_27: 2.0 }, cpa: 106, m6: 0.5359 },
-  Roku:    { spend: { q3_26: 1.5, q4_26: 2.0, q1_27: 2.0 }, cpa:  68, m6: 0.3908 },
-  LG:      { spend: { q3_26: 0.0, q4_26: 0.0, q1_27: 0.0 }, cpa:  90, m6: 0.3449 },
-  Samsung: { spend: { q3_26: 0.0, q4_26: 0.0, q1_27: 0.0 }, cpa:  90, m6: 0.4065 },
-  Web:     { spend: { q3_26: 0.5, q4_26: 1.5, q1_27: 3.0 }, cpa:  70, m6: 0.3756 },
+  FireTV:  { spend: bkspend(2.0, 2.5, 2.0), cpa: bkflat(106), m6: 0.5359 },
+  Roku:    { spend: bkspend(1.5, 2.0, 2.0), cpa: bkflat( 68), m6: 0.3908 },
+  LG:      { spend: bkspend(0.0, 0.0, 0.0), cpa: bkflat( 90), m6: 0.3449 },
+  Samsung: { spend: bkspend(0.0, 0.0, 0.0), cpa: bkflat( 90), m6: 0.4065 },
+  Web:     { spend: bkspend(0.5, 1.5, 3.0), cpa: bkflat( 70), m6: 0.3756 },
 };
 // Q1 2026 qualified-CPA per platform — referenced by FireTV "snap to Q1" toggle
 const Q1_QUALIFIED_CPA = { FireTV: 101, Roku: 52, LG: 53, Samsung: 47, Web: 70 };
@@ -781,10 +815,11 @@ function computeModel(controlState) {
 
   // Effective per-platform parameters at week w
   function effAt(w) {
+    const bkt = bucketOf(WEEKS[w]);
     const e = {};
     for (const p of PLATFORMS) {
       const ps = controlState.platforms[p];
-      let cpa = ps.cpa;
+      let cpa = ps.cpa[bkt];        // per-bucket CPA (monthly Jul-Dec, then Q1'27)
       let m6 = ps.m6;
       let spendMult = 1.0;
       // Universal Checkout has shipped: Web acquires directly from its own spend / CPA /
@@ -800,7 +835,7 @@ function computeModel(controlState) {
       // NB: the Price Increase M6 penalty is applied PER-COHORT in the aging loop (only to
       // cohorts that actually pay the higher price), not platform-wide here.
 
-      e[p] = { cpa, m6, spendMult, spendGate, spend: ps.spend };
+      e[p] = { cpa, m6, spendMult, spendGate, spend: ps.spend[bkt] };  // spend = this week's bucket $M
     }
     return e;
   }
@@ -902,7 +937,7 @@ function computeModel(controlState) {
 
   for (let w = 0; w < N; w++) {
     const wkTs = WEEK_TS[w];
-    const q = quarterOf(WEEKS[w]);
+    const bkt = bucketOf(WEEKS[w]);
     const eff = effAt(w);
     lastEff = eff;
 
@@ -912,13 +947,12 @@ function computeModel(controlState) {
     let weekSpendTotal = 0, weekNewTotal = 0;
 
     // 1) Acquire this week's new cohort per platform.
-    // The quarterly spend slider is interpreted as a 13-week-quarter RUN RATE
-    // (so values are directly comparable across all four quarters, even though
-    // model-Q2 is only 9 actual weeks). Partial quarters spend a proportionate
-    // fraction; full quarters spend the full slider value.
+    // Each spend bucket (monthly Jul-Dec, plus one Q1'27) is the TOTAL $M for that
+    // period, spread evenly across the model weeks that fall in it, so the bucket
+    // value equals the period's spend regardless of 4- vs 5-week months.
     for (const p of PLATFORMS) {
       const e = eff[p];
-      const weeklySpend = (e.spend[q] * 1e6 * e.spendMult * e.spendGate) / 13;
+      const weeklySpend = (e.spend * 1e6 * e.spendMult * e.spendGate) / (WEEKS_IN_BUCKET[bkt] || 1);
       const paidSubs = e.cpa > 0 ? weeklySpend / e.cpa : 0;
       // LG/Samsung also acquire a spend-independent organic baseline (partner-commit funded),
       // so their CAC = (variable spend + partner commit) / (paid + organic) stays finite at $0 spend.
@@ -1218,11 +1252,28 @@ function sliderRow(opts) {
   return wrap;
 }
 
-const QUARTERS = [
-  { id: 'q3_26', label: 'Q3 26' },
-  { id: 'q4_26', label: 'Q4 26' },
-  { id: 'q1_27', label: 'Q1 27' },
-];
+// Build a per-bucket slider grid (shared by the spend and CPA panels). `obj` is the
+// live per-platform bucket object (ps.spend or ps.cpa), mutated in place on input.
+function buildBucketGrid(obj, fmt, min, max, step) {
+  const grid = document.createElement('div');
+  grid.className = 'bucket-grid';
+  BUCKETS.forEach(b => {
+    const cell = document.createElement('div'); cell.className = 'qcell';
+    const ql = document.createElement('span'); ql.className = 'q'; ql.textContent = b.label; cell.appendChild(ql);
+    const v = document.createElement('span'); v.className = 'v'; v.textContent = fmt(obj[b.id]); cell.appendChild(v);
+    const input = document.createElement('input');
+    input.type = 'range'; input.min = String(min); input.max = String(max); input.step = String(step); input.value = obj[b.id];
+    cell.appendChild(input);
+    input.addEventListener('input', () => {
+      const nv = parseFloat(input.value);
+      obj[b.id] = nv;
+      v.textContent = fmt(nv);
+      render();
+    });
+    grid.appendChild(cell);
+  });
+  return grid;
+}
 
 function buildLeversBody() {
   const body = qs('#leversBody');
@@ -1255,42 +1306,21 @@ function buildLeversBody() {
   const ps = state.platforms[p];
   const base = DEFAULT_PLATFORM_STATE[p];
 
-  const sectionLabel = document.createElement('div');
-  sectionLabel.style.cssText = 'font-size:10px;letter-spacing:0.10em;text-transform:uppercase;color:var(--w-midnight-60);font-weight:700;margin-top:6px;';
-  sectionLabel.textContent = 'Marketing spend by quarter (' + dollarSign + 'M)';
-  body.appendChild(sectionLabel);
+  const spendLabel = document.createElement('div');
+  spendLabel.style.cssText = 'font-size:10px;letter-spacing:0.10em;text-transform:uppercase;color:var(--w-midnight-60);font-weight:700;margin-top:6px;';
+  spendLabel.textContent = 'Marketing spend by month (' + dollarSign + 'M)';
+  body.appendChild(spendLabel);
+  body.appendChild(buildBucketGrid(ps.spend, v => dollarSign + v.toFixed(2) + 'M', 0, 8, 0.05));
 
-  const grid = document.createElement('div');
-  grid.className = 'quarter-grid';
-  QUARTERS.forEach(q => {
-    const cell = document.createElement('div'); cell.className = 'qcell';
-    const ql = document.createElement('span'); ql.className = 'q'; ql.textContent = q.label; cell.appendChild(ql);
-    const v = document.createElement('span'); v.className = 'v'; v.textContent = dollarSign + ps.spend[q.id].toFixed(2) + 'M'; cell.appendChild(v);
-    const input = document.createElement('input');
-    input.type = 'range'; input.min = '0'; input.max = '8'; input.step = '0.05'; input.value = ps.spend[q.id];
-    cell.appendChild(input);
-    input.addEventListener('input', () => {
-      const nv = parseFloat(input.value);
-      ps.spend[q.id] = nv;
-      v.textContent = dollarSign + nv.toFixed(2) + 'M';
-      render();
-    });
-    grid.appendChild(cell);
-  });
-  body.appendChild(grid);
+  const cpaLabel = document.createElement('div');
+  cpaLabel.style.cssText = 'font-size:10px;letter-spacing:0.10em;text-transform:uppercase;color:var(--w-midnight-60);font-weight:700;margin-top:12px;';
+  cpaLabel.textContent = 'CPA by month (' + dollarSign + ')';
+  body.appendChild(cpaLabel);
+  body.appendChild(buildBucketGrid(ps.cpa, v => dollarSign + Math.round(v), 8, 250, 1));
 
   const sliders = document.createElement('div');
   sliders.className = 'sliders';
-  sliders.style.marginTop = '10px';
-  sliders.appendChild(sliderRow({
-    id: 'cpa_' + p,
-    label: 'CPA',
-    value: ps.cpa,
-    fmt: v => dollarSign + v.toFixed(0),
-    min: 8, max: 250, step: 1,
-    baseline: base.cpa,
-    onInput: v => { ps.cpa = v; },
-  }));
+  sliders.style.marginTop = '12px';
   sliders.appendChild(sliderRow({
     id: 'm6_' + p,
     label: 'M6 retention rate',
