@@ -212,7 +212,7 @@
     width: 14px; height: 14px; border-radius: 999px;
     background: var(--card); border: 2px solid var(--accent); cursor: pointer;
   }
-  .quarter-grid, .bucket-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 2px; }
+  .quarter-grid, .bucket-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 2px; }
   .qcell { border: 1px solid var(--hairline); border-radius: 5px; padding: 7px 8px 8px; display: flex; flex-direction: column; gap: 5px; }
   .qcell .q { font-size: 9.5px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--w-midnight-40); font-weight: 700; }
   .qcell .v { font-size: 13px; font-weight: 500; letter-spacing: -0.015em; }
@@ -587,7 +587,7 @@
 // Growth Scenario Modeler — app logic + model stub
 
 // ----- Date utilities --------------------------------------------------
-const START = new Date('2026-07-06T00:00:00');
+const START = new Date('2026-07-27T00:00:00');
 const END   = new Date('2027-03-30T00:00:00');
 function buildWeeks() {
   const out = [];
@@ -613,7 +613,6 @@ const WEEKS_IN_Q = (() => {
 // ----- Spend / CPA time buckets ------------------------------------------
 // Jul-Dec 2026 are modeled MONTH-BY-MONTH; Q1 2027 stays a single bucket.
 const BUCKETS = [
-  { id: 'jul_26', label: 'Jul 26' },
   { id: 'aug_26', label: 'Aug 26' },
   { id: 'sep_26', label: 'Sep 26' },
   { id: 'oct_26', label: 'Oct 26' },
@@ -622,10 +621,17 @@ const BUCKETS = [
   { id: 'q1_27', label: 'Q1 27' },
 ];
 const BUCKET_IDS = BUCKETS.map(b => b.id);
-const MONTH_KEYS_26 = ['jul_26', 'aug_26', 'sep_26', 'oct_26', 'nov_26', 'dec_26'];
+// NB: the Aug 26 bucket deliberately spans 2026-07-27 -> 2026-08-31 (the stub week from
+// the anchor plus all of August), so July's 5 trailing days are covered by Aug inputs.
 function bucketOf(d) {
   const y = d.getFullYear(), m = d.getMonth();
-  if (y === 2026 && m >= 6 && m <= 11) return MONTH_KEYS_26[m - 6];
+  if (y === 2026) {
+    if (m === 6 || m === 7) return 'aug_26';   // Jul 27-31 + August
+    if (m === 8)  return 'sep_26';
+    if (m === 9)  return 'oct_26';
+    if (m === 10) return 'nov_26';
+    if (m === 11) return 'dec_26';
+  }
   return 'q1_27';  // Jan-Mar 2027 (and anything beyond)
 }
 const WEEKS_IN_BUCKET = (() => {
@@ -633,11 +639,10 @@ const WEEKS_IN_BUCKET = (() => {
   WEEKS.forEach(d => c[bucketOf(d)]++);
   return c;
 })();
-// Build per-platform bucket objects. bkspend() splits a quarterly $M figure evenly
-// across that quarter's three months; the Q1'27 figure is used whole. bkflat() sets
-// every bucket to the same value (used for the default flat CPA per platform).
-function bkspend(q3, q4, q1) {
-  return { jul_26: q3 / 3, aug_26: q3 / 3, sep_26: q3 / 3, oct_26: q4 / 3, nov_26: q4 / 3, dec_26: q4 / 3, q1_27: q1 };
+// bk() builds an explicit per-bucket object; bkflat() sets every bucket to one value
+// (used for the default flat CPA per platform).
+function bk(aug, sep, oct, nov, dec, q1) {
+  return { aug_26: aug, sep_26: sep, oct_26: oct, nov_26: nov, dec_26: dec, q1_27: q1 };
 }
 function bkflat(v) { const o = {}; BUCKET_IDS.forEach(b => o[b] = v); return o; }
 const EOY_2026_IDX = (() => {
@@ -688,34 +693,45 @@ const STARTING_SUBS = {
   Samsung:   4860,
   Web:       1720,
 };
-const BASE_PRICE_MONTHLY = 12.99;  // base ARPU; the Price Increase toggle raises NEW subs to $14.99 (+$2)
+// Per-platform go-forward list price for NEW subscribers. FireTV moved to $18.99 the week
+// of 2026-06-29 and Roku the week of 2026-07-06; legacy cohorts carry the price they were
+// acquired at (baked into ENGINE_DATA.legacy_cohorts[].price), so the back book is not
+// retroactively repriced. LG/Samsung/Web remain $12.99 until the Price Increase lever fires.
+const PLATFORM_PRICE = { FireTV: 18.99, Roku: 18.99, LG: 12.99, Samsung: 12.99, Web: 12.99 };
+// Reference price the LTV anchors were measured at — LTV scales with price / this.
+const LTV_PRICE_REF = 12.99;
+// Platforms still at $12.99, i.e. the ones the Price Increase lever acts on.
+const PRICE_LEVER_PLATFORMS = ['LG', 'Samsung', 'Web'];
 
 // Defaults: latest observed state at the 2026-07-06 anchor carried forward,
 // representing the "do nothing different" trajectory. Spend is per bucket (see below)
 // (April monthly × 3). CPA is QUALIFIED — cost per real paid cohort entrant,
 // not gross signup cost — derived from April spend ÷ (April adds × qual rate).
-// Hazard-adjusted retention curves anchor the base to financial truth at 2026-07-06.
-// Web spend follows the post-launch ramp ($100k → $500k/mo); the Universal
-// Checkout toggle gates whether any of it actually fires.
-// Spend is MONTHLY ($M) for Jul-Dec 2026 with a single Q1'27 bucket; bkspend()
-// splits the prior quarterly plan evenly across each quarter's months. CPA is
-// likewise per-bucket (defaults flat per platform). M6 = fitted month-6 retention.
+// Hazard-adjusted retention curves anchor the base to financial truth at 2026-07-27.
+// Buckets are MONTHLY for Aug-Dec 2026 (Aug spans Jul 27-Aug 31) plus a single Q1'27
+// bucket; CPA is likewise per-bucket (defaults flat per platform).
+// spend = TOTAL $M for the bucket. FireTV/Roku Aug-Dec are set from the current weekly
+// run-rate (weeks of Jul 13/20) x weeks in bucket; Q1'27 and all of Web stay on plan.
+// m6    = month-6 retention of the INSTALLED BASE (fitted to observed data).
+// m6New = month-6 retention of cohorts acquired from the anchor forward. Comes from a
+//         SEPARATE fitted curve (ENGINE_DATA.curves_new) that carries the paid-start
+//         month-1 drop. No price-increase penalty is applied by default: the damage from
+//         the $18.99 move shows up in CPA, and a higher price also selects for intent,
+//         so the sign is unclear. Use the Global tab slider to test one.
 const DEFAULT_PLATFORM_STATE = {
-  FireTV:  { spend: bkspend(2.0, 2.5, 2.0), cpa: bkflat(106), m6: 0.5359 },
-  Roku:    { spend: bkspend(1.5, 2.0, 2.0), cpa: bkflat( 68), m6: 0.3908 },
-  LG:      { spend: bkspend(0.0, 0.0, 0.0), cpa: bkflat( 90), m6: 0.3449 },
-  Samsung: { spend: bkspend(0.0, 0.0, 0.0), cpa: bkflat( 90), m6: 0.4065 },
-  Web:     { spend: bkspend(0.5, 1.5, 3.0), cpa: bkflat( 70), m6: 0.3756 },
+  FireTV:  { spend: bk(1.798, 1.199, 1.199, 1.498, 1.199, 2.0), cpa: bkflat( 44), m6: 0.5351, m6New: 0.4399 },
+  Roku:    { spend: bk(0.562, 0.374, 0.374, 0.468, 0.374, 2.0), cpa: bkflat(118), m6: 0.3926, m6New: 0.4147 },
+  LG:      { spend: bk(0.000, 0.000, 0.000, 0.000, 0.000, 0.0), cpa: bkflat( 90), m6: 0.3474, m6New: 0.2896 },
+  Samsung: { spend: bk(0.000, 0.000, 0.000, 0.000, 0.000, 0.0), cpa: bkflat( 90), m6: 0.4088, m6New: 0.4088 },
+  Web:     { spend: bk(0.197, 0.167, 0.500, 0.500, 0.500, 3.0), cpa: bkflat( 70), m6: 0.3779, m6New: 0.3779 },
 };
-// Q1 2026 qualified-CPA per platform — referenced by FireTV "snap to Q1" toggle
-const Q1_QUALIFIED_CPA = { FireTV: 101, Roku: 52, LG: 53, Samsung: 47, Web: 70 };
 // Seasonal Boost — flat organic Christmas lift, distributed per-week across December
 const SEASONAL_BOOST_DECEMBER = { FireTV: 6000, Roku: 6000, LG: 1500, Samsung: 1500, Web: 0 };
 // LG/Samsung organic baseline: spend-independent weekly adds funded by the fixed partner/
 // carriage commitment (both platforms ran ~$0 variable ad spend through mid-2026). Set from
 // the recent zero-variable-spend run-rate. Injected every week regardless of the spend
 // slider; the slider adds INCREMENTAL paid subs on top.
-const ORGANIC_WEEKLY = { LG: 226, Samsung: 286 };
+const ORGANIC_WEEKLY = { LG: 646, Samsung: 300, Web: 117 };
 
 // Fixed 3-year LTV per platform (finance-blessed values). The engine uses these
 // directly as the "anchor" LTVs at default retention. When the M6 slider moves
@@ -723,24 +739,25 @@ const ORGANIC_WEEKLY = { LG: 226, Samsung: 286 };
 // LTV scales by the ratio of (new 3Y retention sum) / (default 3Y retention sum),
 // so retention improvements still flow through to LTV:CAC. Gross = revenue-based;
 // Net = after platform / payment / support costs.
-const LTV_GROSS_3Y = { FireTV: 148.8, Roku: 98.3, LG: 117.2, Samsung: 115.6, Web: 104.8 };
-const LTV_NET_3Y   = { FireTV: 111.6, Roku: 68.8, LG: 86.3, Samsung: 81.2, Web: 85.5 };
+const LTV_GROSS_3Y = { FireTV: 151.6, Roku: 97.5, LG: 109.9, Samsung: 108.8, Web: 98.3 };
+const LTV_NET_3Y   = { FireTV: 113.7, Roku: 68.3, LG: 80.9, Samsung: 76.5, Web: 80.2 };
 
 // Jan–Apr 2026 actual marketing spend, including LG/Samsung partner commitments.
 // Used in the "2026 Marketing Spend" KPI, which sums these historicals plus the
 // modeled May–Dec spend coming out of computeModel().
-const JAN_JUN_2026_ACTUAL_SPEND = {
+const JAN_JUL_2026_ACTUAL_SPEND = {
   // Device-platform spend incl. LG/Samsung partner commitments; excludes Alexa. Source: Hex spend_data_by_day.
-  Jan: 2836721, Feb: 2356537, Mar: 2459762, Apr: 1509002, May: 1728970, Jun: 1349584,
+  // Jul is 1-26 only (the modeled period starts 2026-07-27, so there is no double count).
+  Jan: 2836721, Feb: 2356537, Mar: 2459762, Apr: 1509002, May: 1728970, Jun: 1349584, Jul: 1756568,
 };
-const JAN_JUN_2026_ACTUAL_TOTAL =
-  JAN_JUN_2026_ACTUAL_SPEND.Jan + JAN_JUN_2026_ACTUAL_SPEND.Feb + JAN_JUN_2026_ACTUAL_SPEND.Mar +
-  JAN_JUN_2026_ACTUAL_SPEND.Apr + JAN_JUN_2026_ACTUAL_SPEND.May + JAN_JUN_2026_ACTUAL_SPEND.Jun;
+const JAN_JUL_2026_ACTUAL_TOTAL =
+  JAN_JUL_2026_ACTUAL_SPEND.Jan + JAN_JUL_2026_ACTUAL_SPEND.Feb + JAN_JUL_2026_ACTUAL_SPEND.Mar +
+  JAN_JUL_2026_ACTUAL_SPEND.Apr + JAN_JUL_2026_ACTUAL_SPEND.May + JAN_JUL_2026_ACTUAL_SPEND.Jun +
+  JAN_JUL_2026_ACTUAL_SPEND.Jul;
 
 const TOGGLES = [
-  { id: 'firetvFlow',        name: 'FireTV Conversion Flow Changes',      desc: 'FireTV CPA snaps back to Q1',     mech: 'FireTV CPA snaps back to its Q1 2026 qualified baseline of $101. (Today’s default reflects April’s degraded $133.)' },
   { id: 'rokuMP',            name: 'Roku Multiplatform Ships',            desc: '+4pp M6 retention on Roku',       mech: 'Adds 4 percentage points to Roku\u2019s month-6 retention rate.' },
-  { id: 'priceIncrease',     name: 'Price Increase',                       desc: '$12.99 → $18.99; −5pp M6',     mech: 'New subscribers pay $18.99 instead of $12.99 (+$6/mo) from the chosen start month; existing subs grandfathered. Also reduces M6 retention by 5 percentage points (all platforms) while active. Magnitude adjustable on the Global tab.' },
+  { id: 'priceIncrease',     name: 'Price Increase (LG/Samsung/Web)',      desc: '$12.99 → $18.99; −5pp M6',     mech: 'Moves LG, Samsung and Web/Multiplatform new subscribers from $12.99 to $18.99 (+$6/mo) from the chosen start month; existing subs grandfathered. FireTV and Roku are already at $18.99 so this lever does not affect them. Also reduces M6 retention on the affected platforms by 5pp (adjustable on the Global tab).' },
   { id: 'wofLaunch',         name: 'WoF Multiplatform Launch',             desc: '+3pp M6 on FireTV, LG, Samsung',  mech: 'Adds 3 percentage points to month-6 retention on FireTV, LG and Samsung.' },
   { id: 'aysLaunch',         name: 'AYS Multiplatform Launch',             desc: '+2pp M6 on FireTV, LG, Samsung',  mech: 'Adds 2 percentage points to month-6 retention on FireTV, LG and Samsung.' },
   { id: 'rokuCPAv2',         name: 'Roku CPAv2 Launch',                    desc: '+50% marketing spend on Roku',    mech: 'Multiplies all Roku quarterly spend by 1.5x.' },
@@ -764,7 +781,7 @@ const state = {
   // Each toggle has a "starts in month" — until that week, the toggle has no effect.
   toggleStart: defaultToggleStarts(),
   platforms: JSON.parse(JSON.stringify(DEFAULT_PLATFORM_STATE)),
-  global: { priceIncrease: 6.0 },
+  global: { priceIncrease: 6.0, priceM6Penalty: 0.05 },
   activeTab: 'FireTV',
   snapshots: [],
 };
@@ -776,7 +793,7 @@ const SNAPSHOT_COLORS = ['#D373B3', '#58BF3D', '#FB7928', '#ADE0EB', '#BCE107', 
 // platform margins, partner commitments. Calibrated so the model
 // reconciles to actual 2026-07-06 active subscribers per platform.
 // =====================================================================
-const ENGINE_DATA = JSON.parse('{"curves":{"FireTV":{"b":13.489098,"c":1.695443,"lambda":0.0},"Roku":{"b":1.294235,"c":0.429045,"lambda":0.032943},"LG":{"b":3.580804,"c":0.811718,"lambda":0.044257},"Samsung":{"b":3.504147,"c":0.72171,"lambda":0.03},"Web":{"b":3.623036,"c":0.792319,"lambda":0.034198}},"platforms":["FireTV","Roku","LG","Samsung","Web"],"price_default":12.99,"margins_default":{"FireTV":0.75,"Roku":0.7,"LG":0.736,"Samsung":0.703,"Web":0.816},"partner_commit":{"LG":214272,"Samsung":145833},"qual_rate":{"FireTV":1.0,"Roku":1.0,"LG":1.0,"Samsung":1.0,"Web":1.0},"legacy_cohorts":{"FireTV":[{"date":"2025-01-06","size":285.006},{"date":"2025-01-13","size":150.885},{"date":"2025-01-20","size":699.201},{"date":"2025-01-27","size":743.579},{"date":"2025-02-03","size":1218.917},{"date":"2025-02-10","size":1180.456},{"date":"2025-02-17","size":1519.701},{"date":"2025-02-24","size":1132.133},{"date":"2025-03-03","size":1095.645},{"date":"2025-03-10","size":1534.494},{"date":"2025-03-17","size":1618.319},{"date":"2025-03-24","size":1616.347},{"date":"2025-03-31","size":1576.9},{"date":"2025-04-07","size":1928.966},{"date":"2025-04-14","size":1960.523},{"date":"2025-04-21","size":1894.449},{"date":"2025-04-28","size":1458.558},{"date":"2025-05-05","size":1444.752},{"date":"2025-05-12","size":1530.549},{"date":"2025-05-19","size":1454.614},{"date":"2025-05-26","size":1046.336},{"date":"2025-06-02","size":962.51},{"date":"2025-06-09","size":1153.829},{"date":"2025-06-16","size":1028.584},{"date":"2025-06-23","size":1217.931},{"date":"2025-06-30","size":1280.06},{"date":"2025-07-07","size":861.92},{"date":"2025-07-14","size":1072.962},{"date":"2025-07-21","size":1362.899},{"date":"2025-07-28","size":978.289},{"date":"2025-08-04","size":1045.349},{"date":"2025-08-11","size":1107.479},{"date":"2025-08-18","size":1258.364},{"date":"2025-08-25","size":1432.918},{"date":"2025-09-01","size":980.262},{"date":"2025-09-08","size":1398.401},{"date":"2025-09-15","size":1037.46},{"date":"2025-09-22","size":670.602},{"date":"2025-09-29","size":884.602},{"date":"2025-10-06","size":1341.203},{"date":"2025-10-13","size":2558.148},{"date":"2025-10-20","size":3798.76},{"date":"2025-10-27","size":2921.061},{"date":"2025-11-03","size":2610.415},{"date":"2025-11-10","size":2419.096},{"date":"2025-11-17","size":3473.321},{"date":"2025-11-24","size":2529.548},{"date":"2025-12-01","size":2897.393},{"date":"2025-12-08","size":2287.935},{"date":"2025-12-15","size":2576.885},{"date":"2025-12-22","size":2455.585},{"date":"2025-12-29","size":4045.305},{"date":"2026-01-05","size":5622.205},{"date":"2026-01-12","size":3245.514},{"date":"2026-01-19","size":2069.003},{"date":"2026-01-26","size":1836.265},{"date":"2026-02-02","size":3814.539},{"date":"2026-02-09","size":2264.266},{"date":"2026-02-16","size":3047.292},{"date":"2026-02-23","size":3048.278},{"date":"2026-03-02","size":3241.569},{"date":"2026-03-09","size":4665.611},{"date":"2026-03-16","size":3261.293},{"date":"2026-03-23","size":2366.829},{"date":"2026-03-30","size":1111.423},{"date":"2026-04-06","size":1206.097},{"date":"2026-04-13","size":1456.586},{"date":"2026-04-20","size":770.206},{"date":"2026-04-27","size":878.685},{"date":"2026-05-04","size":1269.212},{"date":"2026-05-11","size":1728.771},{"date":"2026-05-18","size":1511.812},{"date":"2026-05-25","size":1317.535},{"date":"2026-06-01","size":1463.489},{"date":"2026-06-08","size":1475.323},{"date":"2026-06-15","size":1207.083},{"date":"2026-06-22","size":501.965},{"date":"2026-06-29","size":902.354}],"Roku":[{"date":"2025-01-06","size":2493.166},{"date":"2025-01-13","size":3042.147},{"date":"2025-01-20","size":1909.33},{"date":"2025-01-27","size":2435.073},{"date":"2025-02-03","size":2427.327},{"date":"2025-02-10","size":2914.342},{"date":"2025-02-17","size":2041.976},{"date":"2025-02-24","size":2069.086},{"date":"2025-03-03","size":2557.069},{"date":"2025-03-10","size":2594.829},{"date":"2025-03-17","size":1963.55},{"date":"2025-03-24","size":1727.304},{"date":"2025-03-31","size":1540.438},{"date":"2025-04-07","size":2006.152},{"date":"2025-04-14","size":2614.194},{"date":"2025-04-21","size":2758.459},{"date":"2025-04-28","size":3203.84},{"date":"2025-05-05","size":3681.172},{"date":"2025-05-12","size":2351.806},{"date":"2025-05-19","size":2066.181},{"date":"2025-05-26","size":2463.151},{"date":"2025-06-02","size":2061.34},{"date":"2025-06-09","size":2012.929},{"date":"2025-06-16","size":4004.558},{"date":"2025-06-23","size":1730.209},{"date":"2025-06-30","size":1121.199},{"date":"2025-07-07","size":989.521},{"date":"2025-07-14","size":1438.775},{"date":"2025-07-21","size":2550.291},{"date":"2025-07-28","size":1869.633},{"date":"2025-08-04","size":1434.902},{"date":"2025-08-11","size":1483.313},{"date":"2025-08-18","size":2503.817},{"date":"2025-08-25","size":2715.857},{"date":"2025-09-01","size":2707.143},{"date":"2025-09-08","size":2284.031},{"date":"2025-09-15","size":1897.711},{"date":"2025-09-22","size":2102.005},{"date":"2025-09-29","size":2222.065},{"date":"2025-10-06","size":1970.328},{"date":"2025-10-13","size":2595.798},{"date":"2025-10-20","size":3024.719},{"date":"2025-10-27","size":2774.918},{"date":"2025-11-03","size":3710.219},{"date":"2025-11-10","size":4453.812},{"date":"2025-11-17","size":4744.278},{"date":"2025-11-24","size":4980.523},{"date":"2025-12-01","size":5829.652},{"date":"2025-12-08","size":4649.392},{"date":"2025-12-15","size":4535.142},{"date":"2025-12-22","size":5013.443},{"date":"2025-12-29","size":6610.037},{"date":"2026-01-05","size":3654.062},{"date":"2026-01-12","size":3029.56},{"date":"2026-01-19","size":3292.916},{"date":"2026-01-26","size":4064.587},{"date":"2026-02-02","size":3875.784},{"date":"2026-02-09","size":3000.513},{"date":"2026-02-16","size":2991.8},{"date":"2026-02-23","size":3072.162},{"date":"2026-03-02","size":2329.537},{"date":"2026-03-09","size":1976.137},{"date":"2026-03-16","size":2448.628},{"date":"2026-03-23","size":2578.37},{"date":"2026-03-30","size":2842.694},{"date":"2026-04-06","size":2220.128},{"date":"2026-04-13","size":1651.783},{"date":"2026-04-20","size":2341.156},{"date":"2026-04-27","size":2756.522},{"date":"2026-05-04","size":2626.781},{"date":"2026-05-11","size":2206.573},{"date":"2026-05-18","size":2674.223},{"date":"2026-05-25","size":3001.482},{"date":"2026-06-01","size":2615.162},{"date":"2026-06-08","size":2360.52},{"date":"2026-06-15","size":3084.749},{"date":"2026-06-22","size":2487.357},{"date":"2026-06-29","size":1933.535}],"LG":[{"date":"2025-01-06","size":58.528},{"date":"2025-01-13","size":45.36},{"date":"2025-01-20","size":23.411},{"date":"2025-01-27","size":32.191},{"date":"2025-02-03","size":38.044},{"date":"2025-02-10","size":33.654},{"date":"2025-02-17","size":32.191},{"date":"2025-02-24","size":40.97},{"date":"2025-03-03","size":19.022},{"date":"2025-03-10","size":17.559},{"date":"2025-03-17","size":14.632},{"date":"2025-03-24","size":10.242},{"date":"2025-03-31","size":7.316},{"date":"2025-04-07","size":10.242},{"date":"2025-04-14","size":2.926},{"date":"2025-04-21","size":8.779},{"date":"2025-04-28","size":4.39},{"date":"2025-05-05","size":7.316},{"date":"2025-05-12","size":11.706},{"date":"2025-05-19","size":2.926},{"date":"2025-05-26","size":2.926},{"date":"2025-06-02","size":4.39},{"date":"2025-06-09","size":1.463},{"date":"2025-06-16","size":7.316},{"date":"2025-06-23","size":5.853},{"date":"2025-06-30","size":5.853},{"date":"2025-07-07","size":11.706},{"date":"2025-07-14","size":2.926},{"date":"2025-07-21","size":7.316},{"date":"2025-07-28","size":0.0},{"date":"2025-08-04","size":4.39},{"date":"2025-08-11","size":5.853},{"date":"2025-08-18","size":4.39},{"date":"2025-08-25","size":7.316},{"date":"2025-09-01","size":5.853},{"date":"2025-09-08","size":5.853},{"date":"2025-09-15","size":4.39},{"date":"2025-09-22","size":4.39},{"date":"2025-09-29","size":0.0},{"date":"2025-10-06","size":1.463},{"date":"2025-10-13","size":4.39},{"date":"2025-10-20","size":2.926},{"date":"2025-10-27","size":2.926},{"date":"2025-11-03","size":2.926},{"date":"2025-11-10","size":4.39},{"date":"2025-11-17","size":2.926},{"date":"2025-11-24","size":55.602},{"date":"2025-12-01","size":288.253},{"date":"2025-12-08","size":392.141},{"date":"2025-12-15","size":185.828},{"date":"2025-12-22","size":177.049},{"date":"2025-12-29","size":728.679},{"date":"2026-01-05","size":711.121},{"date":"2026-01-12","size":292.642},{"date":"2026-01-19","size":278.01},{"date":"2026-01-26","size":305.811},{"date":"2026-02-02","size":269.231},{"date":"2026-02-09","size":272.157},{"date":"2026-02-16","size":327.759},{"date":"2026-02-23","size":291.179},{"date":"2026-03-02","size":219.482},{"date":"2026-03-09","size":218.019},{"date":"2026-03-16","size":357.024},{"date":"2026-03-23","size":595.527},{"date":"2026-03-30","size":561.873},{"date":"2026-04-06","size":320.443},{"date":"2026-04-13","size":245.82},{"date":"2026-04-20","size":171.196},{"date":"2026-04-27","size":308.738},{"date":"2026-05-04","size":286.79},{"date":"2026-05-11","size":223.871},{"date":"2026-05-18","size":460.912},{"date":"2026-05-25","size":699.415},{"date":"2026-06-01","size":295.569},{"date":"2026-06-08","size":216.555},{"date":"2026-06-15","size":317.517},{"date":"2026-06-22","size":251.672},{"date":"2026-06-29","size":498.955}],"Samsung":[{"date":"2025-10-06","size":1.107},{"date":"2025-10-13","size":1.107},{"date":"2025-10-20","size":0.0},{"date":"2025-10-27","size":0.0},{"date":"2025-11-03","size":0.0},{"date":"2025-11-10","size":4.427},{"date":"2025-11-17","size":48.699},{"date":"2025-11-24","size":110.679},{"date":"2025-12-01","size":209.184},{"date":"2025-12-08","size":143.883},{"date":"2025-12-15","size":70.835},{"date":"2025-12-22","size":22.136},{"date":"2025-12-29","size":35.417},{"date":"2026-01-05","size":240.174},{"date":"2026-01-12","size":325.397},{"date":"2026-01-19","size":508.018},{"date":"2026-01-26","size":458.212},{"date":"2026-02-02","size":271.164},{"date":"2026-02-09","size":240.174},{"date":"2026-02-16","size":246.815},{"date":"2026-02-23","size":283.339},{"date":"2026-03-02","size":195.902},{"date":"2026-03-09","size":128.388},{"date":"2026-03-16","size":168.232},{"date":"2026-03-23","size":131.708},{"date":"2026-03-30","size":115.106},{"date":"2026-04-06","size":171.553},{"date":"2026-04-13","size":168.232},{"date":"2026-04-20","size":139.456},{"date":"2026-04-27","size":480.348},{"date":"2026-05-04","size":406.193},{"date":"2026-05-11","size":365.241},{"date":"2026-05-18","size":382.95},{"date":"2026-05-25","size":413.94},{"date":"2026-06-01","size":323.183},{"date":"2026-06-08","size":303.261},{"date":"2026-06-15","size":285.552},{"date":"2026-06-22","size":307.688},{"date":"2026-06-29","size":360.814}],"Web":[{"date":"2025-10-27","size":6.991},{"date":"2025-11-24","size":3.496},{"date":"2025-12-01","size":27.966},{"date":"2025-12-08","size":6.991},{"date":"2025-12-15","size":6.991},{"date":"2025-12-22","size":6.991},{"date":"2025-12-29","size":10.487},{"date":"2026-01-05","size":20.974},{"date":"2026-01-12","size":27.966},{"date":"2026-01-19","size":17.479},{"date":"2026-01-26","size":6.991},{"date":"2026-02-02","size":17.479},{"date":"2026-02-09","size":3.496},{"date":"2026-02-16","size":17.479},{"date":"2026-02-23","size":13.983},{"date":"2026-03-02","size":6.991},{"date":"2026-03-09","size":3.496},{"date":"2026-03-16","size":10.487},{"date":"2026-03-23","size":3.496},{"date":"2026-03-30","size":10.487},{"date":"2026-04-06","size":3.496},{"date":"2026-04-13","size":3.496},{"date":"2026-04-20","size":20.974},{"date":"2026-04-27","size":108.368},{"date":"2026-05-04","size":209.744},{"date":"2026-05-11","size":227.222},{"date":"2026-05-18","size":160.804},{"date":"2026-05-25","size":216.735},{"date":"2026-06-01","size":195.761},{"date":"2026-06-08","size":216.735},{"date":"2026-06-15","size":185.274},{"date":"2026-06-22","size":241.205},{"date":"2026-06-29","size":293.641}]},"anchor_iso":"2026-07-06","end_iso":"2027-03-31","target_eoy_arr":60000000}');
+const ENGINE_DATA = JSON.parse('{"curves":{"FireTV":{"b":13.492033,"c":1.699616,"lambda":0.0},"Roku":{"b":1.415411,"c":0.447699,"lambda":0.032237},"LG":{"b":3.103992,"c":0.700677,"lambda":0.050536},"Samsung":{"b":2.655197,"c":0.604723,"lambda":0.03},"Web":{"b":3.027342,"c":0.695815,"lambda":0.035499}},"platforms":["FireTV","Roku","LG","Samsung","Web"],"price_ref":12.99,"platform_price":{"FireTV":18.99,"Roku":18.99,"LG":12.99,"Samsung":12.99,"Web":12.99},"margins_default":{"FireTV":0.75,"Roku":0.7,"LG":0.736,"Samsung":0.703,"Web":0.816},"partner_commit":{"LG":214272,"Samsung":145833},"qual_rate":{"FireTV":1.0,"Roku":1.0,"LG":1.0,"Samsung":1.0,"Web":1.0},"legacy_cohorts":{"FireTV":[{"date":"2025-01-06","size":291.183,"price":12.99},{"date":"2025-01-13","size":154.156,"price":12.99},{"date":"2025-01-20","size":714.356,"price":12.99},{"date":"2025-01-27","size":759.696,"price":12.99},{"date":"2025-02-03","size":1245.337,"price":12.99},{"date":"2025-02-10","size":1206.043,"price":12.99},{"date":"2025-02-17","size":1552.641,"price":12.99},{"date":"2025-02-24","size":1156.672,"price":12.99},{"date":"2025-03-03","size":1119.393,"price":12.99},{"date":"2025-03-10","size":1567.755,"price":12.99},{"date":"2025-03-17","size":1653.397,"price":12.99},{"date":"2025-03-24","size":1651.382,"price":12.99},{"date":"2025-03-31","size":1611.079,"price":12.99},{"date":"2025-04-07","size":1970.776,"price":12.99},{"date":"2025-04-14","size":2003.018,"price":12.99},{"date":"2025-04-21","size":1935.512,"price":12.99},{"date":"2025-04-28","size":1490.173,"price":12.99},{"date":"2025-05-05","size":1476.067,"price":12.99},{"date":"2025-05-12","size":1563.724,"price":12.99},{"date":"2025-05-19","size":1486.143,"price":12.99},{"date":"2025-05-26","size":1069.015,"price":12.99},{"date":"2025-06-02","size":983.373,"price":12.99},{"date":"2025-06-09","size":1178.839,"price":12.99},{"date":"2025-06-16","size":1050.879,"price":12.99},{"date":"2025-06-23","size":1244.33,"price":12.99},{"date":"2025-06-30","size":1307.806,"price":12.99},{"date":"2025-07-07","size":880.603,"price":12.99},{"date":"2025-07-14","size":1096.219,"price":12.99},{"date":"2025-07-21","size":1392.44,"price":12.99},{"date":"2025-07-28","size":999.494,"price":12.99},{"date":"2025-08-04","size":1068.008,"price":12.99},{"date":"2025-08-11","size":1131.484,"price":12.99},{"date":"2025-08-18","size":1285.639,"price":12.99},{"date":"2025-08-25","size":1463.977,"price":12.99},{"date":"2025-09-01","size":1001.509,"price":12.99},{"date":"2025-09-08","size":1428.712,"price":12.99},{"date":"2025-09-15","size":1059.947,"price":12.99},{"date":"2025-09-22","size":685.137,"price":12.99},{"date":"2025-09-29","size":903.776,"price":12.99},{"date":"2025-10-06","size":1369.266,"price":12.99},{"date":"2025-10-13","size":2611.581,"price":12.99},{"date":"2025-10-20","size":3881.099,"price":12.99},{"date":"2025-10-27","size":2984.376,"price":12.99},{"date":"2025-11-03","size":2666.996,"price":12.99},{"date":"2025-11-10","size":2471.531,"price":12.99},{"date":"2025-11-17","size":3548.607,"price":12.99},{"date":"2025-11-24","size":2584.377,"price":12.99},{"date":"2025-12-01","size":2960.195,"price":12.99},{"date":"2025-12-08","size":2337.526,"price":12.99},{"date":"2025-12-15","size":2632.74,"price":12.99},{"date":"2025-12-22","size":2508.81,"price":12.99},{"date":"2025-12-29","size":4132.988,"price":12.99},{"date":"2026-01-05","size":5744.068,"price":12.99},{"date":"2026-01-12","size":3315.861,"price":12.99},{"date":"2026-01-19","size":2113.849,"price":12.99},{"date":"2026-01-26","size":1876.066,"price":12.99},{"date":"2026-02-02","size":3898.228,"price":12.99},{"date":"2026-02-09","size":2313.345,"price":12.99},{"date":"2026-02-16","size":3113.343,"price":12.99},{"date":"2026-02-23","size":3114.351,"price":12.99},{"date":"2026-03-02","size":3311.831,"price":12.99},{"date":"2026-03-09","size":4766.74,"price":12.99},{"date":"2026-03-16","size":3331.982,"price":12.99},{"date":"2026-03-23","size":2418.131,"price":12.99},{"date":"2026-03-30","size":1135.514,"price":12.99},{"date":"2026-04-06","size":1232.239,"price":12.99},{"date":"2026-04-13","size":1488.158,"price":12.99},{"date":"2026-04-20","size":786.9,"price":12.99},{"date":"2026-04-27","size":897.731,"price":12.99},{"date":"2026-05-04","size":1296.722,"price":12.99},{"date":"2026-05-11","size":1766.243,"price":12.99},{"date":"2026-05-18","size":1544.581,"price":12.99},{"date":"2026-05-25","size":1346.093,"price":12.99},{"date":"2026-06-01","size":1495.211,"price":12.99},{"date":"2026-06-08","size":1507.301,"price":12.99},{"date":"2026-06-15","size":1234.254,"price":12.99},{"date":"2026-06-22","size":512.845,"price":12.99},{"date":"2026-06-29","size":886.648,"price":18.99},{"date":"2026-07-06","size":1776.318,"price":18.99},{"date":"2026-07-13","size":8100.737,"price":18.99},{"date":"2026-07-20","size":5621.146,"price":18.99}],"Roku":[{"date":"2025-01-06","size":2453.228,"price":12.99},{"date":"2025-01-13","size":2987.2,"price":12.99},{"date":"2025-01-20","size":1874.601,"price":12.99},{"date":"2025-01-27","size":2393.37,"price":12.99},{"date":"2025-02-03","size":2381.969,"price":12.99},{"date":"2025-02-10","size":2861.783,"price":12.99},{"date":"2025-02-17","size":2002.868,"price":12.99},{"date":"2025-02-24","size":2034.222,"price":12.99},{"date":"2025-03-03","size":2510.236,"price":12.99},{"date":"2025-03-10","size":2547.291,"price":12.99},{"date":"2025-03-17","size":1927.808,"price":12.99},{"date":"2025-03-24","size":1695.977,"price":12.99},{"date":"2025-03-31","size":1511.652,"price":12.99},{"date":"2025-04-07","size":1968.664,"price":12.99},{"date":"2025-04-14","size":2565.343,"price":12.99},{"date":"2025-04-21","size":2705.962,"price":12.99},{"date":"2025-04-28","size":3144.921,"price":12.99},{"date":"2025-05-05","size":3612.384,"price":12.99},{"date":"2025-05-12","size":2306.909,"price":12.99},{"date":"2025-05-19","size":2025.671,"price":12.99},{"date":"2025-05-26","size":2416.173,"price":12.99},{"date":"2025-06-02","size":2020.921,"price":12.99},{"date":"2025-06-09","size":1973.414,"price":12.99},{"date":"2025-06-16","size":3932.576,"price":12.99},{"date":"2025-06-23","size":1697.877,"price":12.99},{"date":"2025-06-30","size":1101.197,"price":12.99},{"date":"2025-07-07","size":973.88,"price":12.99},{"date":"2025-07-14","size":1411.889,"price":12.99},{"date":"2025-07-21","size":2502.635,"price":12.99},{"date":"2025-07-28","size":1835.646,"price":12.99},{"date":"2025-08-04","size":1408.088,"price":12.99},{"date":"2025-08-11","size":1455.595,"price":12.99},{"date":"2025-08-18","size":2457.029,"price":12.99},{"date":"2025-08-25","size":2664.157,"price":12.99},{"date":"2025-09-01","size":2656.556,"price":12.99},{"date":"2025-09-08","size":2241.35,"price":12.99},{"date":"2025-09-15","size":1862.249,"price":12.99},{"date":"2025-09-22","size":2063.676,"price":12.99},{"date":"2025-09-29","size":2181.492,"price":12.99},{"date":"2025-10-06","size":1934.459,"price":12.99},{"date":"2025-10-13","size":2546.341,"price":12.99},{"date":"2025-10-20","size":2968.197,"price":12.99},{"date":"2025-10-27","size":2723.064,"price":12.99},{"date":"2025-11-03","size":3640.887,"price":12.99},{"date":"2025-11-10","size":4370.585,"price":12.99},{"date":"2025-11-17","size":4655.623,"price":12.99},{"date":"2025-11-24","size":4888.404,"price":12.99},{"date":"2025-12-01","size":5721.666,"price":12.99},{"date":"2025-12-08","size":4562.511,"price":12.99},{"date":"2025-12-15","size":4443.745,"price":12.99},{"date":"2025-12-22","size":4918.808,"price":12.99},{"date":"2025-12-29","size":6484.618,"price":12.99},{"date":"2026-01-05","size":3585.78,"price":12.99},{"date":"2026-01-12","size":2965.347,"price":12.99},{"date":"2026-01-19","size":3230.432,"price":12.99},{"date":"2026-01-26","size":3985.784,"price":12.99},{"date":"2026-02-02","size":3803.359,"price":12.99},{"date":"2026-02-09","size":2943.494,"price":12.99},{"date":"2026-02-16","size":2933.043,"price":12.99},{"date":"2026-02-23","size":3012.853,"price":12.99},{"date":"2026-03-02","size":2284.106,"price":12.99},{"date":"2026-03-09","size":1912.606,"price":12.99},{"date":"2026-03-16","size":2354.415,"price":12.99},{"date":"2026-03-23","size":2483.632,"price":12.99},{"date":"2026-03-30","size":2739.217,"price":12.99},{"date":"2026-04-06","size":2141.587,"price":12.99},{"date":"2026-04-13","size":1589.563,"price":12.99},{"date":"2026-04-20","size":2213.796,"price":12.99},{"date":"2026-04-27","size":2599.548,"price":12.99},{"date":"2026-05-04","size":2485.533,"price":12.99},{"date":"2026-05-11","size":2070.327,"price":12.99},{"date":"2026-05-18","size":2457.979,"price":12.99},{"date":"2026-05-25","size":2769.621,"price":12.99},{"date":"2026-06-01","size":2378.168,"price":12.99},{"date":"2026-06-08","size":2157.739,"price":12.99},{"date":"2026-06-15","size":2815.227,"price":12.99},{"date":"2026-06-22","size":2342.063,"price":12.99},{"date":"2026-06-29","size":1812.843,"price":12.99},{"date":"2026-07-06","size":1041.339,"price":18.99},{"date":"2026-07-13","size":745.85,"price":18.99},{"date":"2026-07-20","size":758.201,"price":18.99}],"LG":[{"date":"2025-01-06","size":51.439,"price":12.99},{"date":"2025-01-13","size":39.865,"price":12.99},{"date":"2025-01-20","size":20.576,"price":12.99},{"date":"2025-01-27","size":28.292,"price":12.99},{"date":"2025-02-03","size":33.436,"price":12.99},{"date":"2025-02-10","size":29.578,"price":12.99},{"date":"2025-02-17","size":28.292,"price":12.99},{"date":"2025-02-24","size":36.007,"price":12.99},{"date":"2025-03-03","size":16.718,"price":12.99},{"date":"2025-03-10","size":15.432,"price":12.99},{"date":"2025-03-17","size":12.86,"price":12.99},{"date":"2025-03-24","size":9.002,"price":12.99},{"date":"2025-03-31","size":6.43,"price":12.99},{"date":"2025-04-07","size":9.002,"price":12.99},{"date":"2025-04-14","size":2.572,"price":12.99},{"date":"2025-04-21","size":7.716,"price":12.99},{"date":"2025-04-28","size":3.858,"price":12.99},{"date":"2025-05-05","size":6.43,"price":12.99},{"date":"2025-05-12","size":10.288,"price":12.99},{"date":"2025-05-19","size":2.572,"price":12.99},{"date":"2025-05-26","size":2.572,"price":12.99},{"date":"2025-06-02","size":3.858,"price":12.99},{"date":"2025-06-09","size":1.286,"price":12.99},{"date":"2025-06-16","size":6.43,"price":12.99},{"date":"2025-06-23","size":5.144,"price":12.99},{"date":"2025-06-30","size":5.144,"price":12.99},{"date":"2025-07-07","size":10.288,"price":12.99},{"date":"2025-07-14","size":2.572,"price":12.99},{"date":"2025-07-21","size":6.43,"price":12.99},{"date":"2025-07-28","size":0.0,"price":12.99},{"date":"2025-08-04","size":3.858,"price":12.99},{"date":"2025-08-11","size":5.144,"price":12.99},{"date":"2025-08-18","size":3.858,"price":12.99},{"date":"2025-08-25","size":6.43,"price":12.99},{"date":"2025-09-01","size":5.144,"price":12.99},{"date":"2025-09-08","size":5.144,"price":12.99},{"date":"2025-09-15","size":3.858,"price":12.99},{"date":"2025-09-22","size":3.858,"price":12.99},{"date":"2025-09-29","size":0.0,"price":12.99},{"date":"2025-10-06","size":0.0,"price":12.99},{"date":"2025-10-13","size":2.572,"price":12.99},{"date":"2025-10-20","size":2.572,"price":12.99},{"date":"2025-10-27","size":2.572,"price":12.99},{"date":"2025-11-03","size":2.572,"price":12.99},{"date":"2025-11-10","size":3.858,"price":12.99},{"date":"2025-11-17","size":3.858,"price":12.99},{"date":"2025-11-24","size":50.153,"price":12.99},{"date":"2025-12-01","size":253.338,"price":12.99},{"date":"2025-12-08","size":344.643,"price":12.99},{"date":"2025-12-15","size":163.32,"price":12.99},{"date":"2025-12-22","size":155.604,"price":12.99},{"date":"2025-12-29","size":640.419,"price":12.99},{"date":"2026-01-05","size":624.987,"price":12.99},{"date":"2026-01-12","size":257.196,"price":12.99},{"date":"2026-01-19","size":244.336,"price":12.99},{"date":"2026-01-26","size":268.77,"price":12.99},{"date":"2026-02-02","size":236.621,"price":12.99},{"date":"2026-02-09","size":239.193,"price":12.99},{"date":"2026-02-16","size":288.06,"price":12.99},{"date":"2026-02-23","size":255.91,"price":12.99},{"date":"2026-03-02","size":192.897,"price":12.99},{"date":"2026-03-09","size":191.611,"price":12.99},{"date":"2026-03-16","size":313.779,"price":12.99},{"date":"2026-03-23","size":523.394,"price":12.99},{"date":"2026-03-30","size":493.817,"price":12.99},{"date":"2026-04-06","size":281.63,"price":12.99},{"date":"2026-04-13","size":216.045,"price":12.99},{"date":"2026-04-20","size":150.46,"price":12.99},{"date":"2026-04-27","size":271.342,"price":12.99},{"date":"2026-05-04","size":252.052,"price":12.99},{"date":"2026-05-11","size":196.755,"price":12.99},{"date":"2026-05-18","size":405.084,"price":12.99},{"date":"2026-05-25","size":614.699,"price":12.99},{"date":"2026-06-01","size":259.768,"price":12.99},{"date":"2026-06-08","size":190.325,"price":12.99},{"date":"2026-06-15","size":280.344,"price":12.99},{"date":"2026-06-22","size":221.189,"price":12.99},{"date":"2026-06-29","size":438.52,"price":12.99},{"date":"2026-07-06","size":398.654,"price":12.99},{"date":"2026-07-13","size":832.03,"price":12.99},{"date":"2026-07-20","size":828.172,"price":12.99}],"Samsung":[{"date":"2025-11-10","size":4.283,"price":12.99},{"date":"2025-11-17","size":47.112,"price":12.99},{"date":"2025-11-24","size":107.073,"price":12.99},{"date":"2025-12-01","size":202.368,"price":12.99},{"date":"2025-12-08","size":139.195,"price":12.99},{"date":"2025-12-15","size":68.527,"price":12.99},{"date":"2025-12-22","size":21.415,"price":12.99},{"date":"2025-12-29","size":34.263,"price":12.99},{"date":"2026-01-05","size":232.348,"price":12.99},{"date":"2026-01-12","size":314.794,"price":12.99},{"date":"2026-01-19","size":491.464,"price":12.99},{"date":"2026-01-26","size":443.281,"price":12.99},{"date":"2026-02-02","size":261.258,"price":12.99},{"date":"2026-02-09","size":232.348,"price":12.99},{"date":"2026-02-16","size":238.772,"price":12.99},{"date":"2026-02-23","size":274.106,"price":12.99},{"date":"2026-03-02","size":189.519,"price":12.99},{"date":"2026-03-09","size":124.204,"price":12.99},{"date":"2026-03-16","size":162.751,"price":12.99},{"date":"2026-03-23","size":127.417,"price":12.99},{"date":"2026-03-30","size":111.356,"price":12.99},{"date":"2026-04-06","size":165.963,"price":12.99},{"date":"2026-04-13","size":162.751,"price":12.99},{"date":"2026-04-20","size":134.912,"price":12.99},{"date":"2026-04-27","size":463.625,"price":12.99},{"date":"2026-05-04","size":392.957,"price":12.99},{"date":"2026-05-11","size":353.34,"price":12.99},{"date":"2026-05-18","size":370.472,"price":12.99},{"date":"2026-05-25","size":400.452,"price":12.99},{"date":"2026-06-01","size":314.794,"price":12.99},{"date":"2026-06-08","size":294.45,"price":12.99},{"date":"2026-06-15","size":276.248,"price":12.99},{"date":"2026-06-22","size":298.733,"price":12.99},{"date":"2026-06-29","size":351.199,"price":12.99},{"date":"2026-07-06","size":310.511,"price":12.99},{"date":"2026-07-13","size":364.048,"price":12.99},{"date":"2026-07-20","size":357.623,"price":12.99}],"Web":[{"date":"2025-10-27","size":4.253,"price":12.99},{"date":"2025-11-03","size":0.0,"price":12.99},{"date":"2025-11-10","size":0.0,"price":12.99},{"date":"2025-11-17","size":0.0,"price":12.99},{"date":"2025-11-24","size":2.127,"price":12.99},{"date":"2025-12-01","size":17.013,"price":12.99},{"date":"2025-12-08","size":4.253,"price":12.99},{"date":"2025-12-15","size":4.253,"price":12.99},{"date":"2025-12-22","size":4.253,"price":12.99},{"date":"2025-12-29","size":6.38,"price":12.99},{"date":"2026-01-05","size":12.759,"price":12.99},{"date":"2026-01-12","size":17.013,"price":12.99},{"date":"2026-01-19","size":10.633,"price":12.99},{"date":"2026-01-26","size":4.253,"price":12.99},{"date":"2026-02-02","size":10.633,"price":12.99},{"date":"2026-02-09","size":2.127,"price":12.99},{"date":"2026-02-16","size":10.633,"price":12.99},{"date":"2026-02-23","size":8.506,"price":12.99},{"date":"2026-03-02","size":4.253,"price":12.99},{"date":"2026-03-09","size":2.127,"price":12.99},{"date":"2026-03-16","size":6.38,"price":12.99},{"date":"2026-03-23","size":2.127,"price":12.99},{"date":"2026-03-30","size":6.38,"price":12.99},{"date":"2026-04-06","size":2.127,"price":12.99},{"date":"2026-04-13","size":2.127,"price":12.99},{"date":"2026-04-20","size":12.759,"price":12.99},{"date":"2026-04-27","size":68.05,"price":12.99},{"date":"2026-05-04","size":127.595,"price":12.99},{"date":"2026-05-11","size":138.227,"price":12.99},{"date":"2026-05-18","size":97.823,"price":12.99},{"date":"2026-05-25","size":131.848,"price":12.99},{"date":"2026-06-01","size":114.835,"price":12.99},{"date":"2026-06-08","size":129.721,"price":12.99},{"date":"2026-06-15","size":110.582,"price":12.99},{"date":"2026-06-22","size":142.481,"price":12.99},{"date":"2026-06-29","size":210.531,"price":12.99},{"date":"2026-07-06","size":270.075,"price":12.99},{"date":"2026-07-13","size":212.658,"price":12.99},{"date":"2026-07-20","size":301.974,"price":12.99}]},"anchor_iso":"2026-07-27","end_iso":"2027-03-31","target_eoy_arr":60000000,"curves_new":{"FireTV":{"b":0.749663,"c":0.260311,"lambda":0.041514},"Roku":{"b":1.279575,"c":0.380662,"lambda":0.036399},"LG":{"b":0.547745,"c":0.329295,"lambda":0.070381},"Samsung":{"b":2.655197,"c":0.604723,"lambda":0.03},"Web":{"b":3.027342,"c":0.695815,"lambda":0.035499}}}');
 
 // Pre-parse legacy cohort dates once and pre-compute their "age in months at week W"
 // for each modeled week. This keeps the hot per-slider recompute fast.
@@ -786,6 +803,7 @@ const LEGACY_PARSED = (() => {
     out[p] = ENGINE_DATA.legacy_cohorts[p].map(c => ({
       ts: new Date(c.date + 'T00:00:00').getTime(),
       size: c.size,
+      price: c.price,   // price the cohort was acquired at ($12.99 or $18.99)
     }));
   }
   return out;
@@ -819,31 +837,40 @@ function computeModel(controlState) {
     const e = {};
     for (const p of PLATFORMS) {
       const ps = controlState.platforms[p];
-      let cpa = ps.cpa[bkt];        // per-bucket CPA (monthly Jul-Dec, then Q1'27)
-      let m6 = ps.m6;
+      let cpa = ps.cpa[bkt];        // per-bucket CPA (monthly Aug-Dec, then Q1'27)
+      let m6 = ps.m6;               // installed-base regime
+      let m6New = ps.m6New;         // cohorts acquired from the anchor forward
       let spendMult = 1.0;
       // Universal Checkout has shipped: Web acquires directly from its own spend / CPA /
       // M6 levers, ungated, like every other platform.
       let spendGate = 1.0;
 
-      if (isActive('firetvFlow', w) && p === 'FireTV')                                              cpa = Q1_QUALIFIED_CPA.FireTV;
-      if (isActive('rokuMP', w)     && p === 'Roku')                                                m6 = Math.min(0.98, m6 + 0.04);
-      if (isActive('wofLaunch', w)  && (p === 'FireTV' || p === 'LG' || p === 'Samsung'))           m6 = Math.min(0.98, m6 + 0.03);
-      if (isActive('aysLaunch', w)  && (p === 'FireTV' || p === 'LG' || p === 'Samsung'))           m6 = Math.min(0.98, m6 + 0.02);
+      // Product-retention toggles lift BOTH regimes (they help the base and new cohorts alike).
+      if (isActive('rokuMP', w)     && p === 'Roku')                                              { m6 += 0.04; m6New += 0.04; }
+      if (isActive('wofLaunch', w)  && (p === 'FireTV' || p === 'LG' || p === 'Samsung'))         { m6 += 0.03; m6New += 0.03; }
+      if (isActive('aysLaunch', w)  && (p === 'FireTV' || p === 'LG' || p === 'Samsung'))         { m6 += 0.02; m6New += 0.02; }
+      m6 = Math.min(0.98, m6); m6New = Math.min(0.98, m6New);
       if (isActive('rokuCPAv2', w)  && p === 'Roku')                                                spendMult *= 1.50;
       if (isActive('lgsamConv', w)  && (p === 'LG' || p === 'Samsung'))                             cpa *= 0.70;
       // NB: the Price Increase M6 penalty is applied PER-COHORT in the aging loop (only to
       // cohorts that actually pay the higher price), not platform-wide here.
 
-      e[p] = { cpa, m6, spendMult, spendGate, spend: ps.spend[bkt] };  // spend = this week's bucket $M
+      e[p] = { cpa, m6, m6New, spendMult, spendGate, spend: ps.spend[bkt] };  // spend = this week's bucket $M
     }
     return e;
   }
 
   // Hazard-adjusted retention: R(t) = (1 + t/b)^(-c) * exp(-lambda*t).
   // If m6Target given, solve c so effective R(6) = m6Target.
-  function retention(p, ageM, m6Target) {
-    const cv = ENGINE_DATA.curves[p];
+  // isNew picks the NEW-COHORT curve family. Paid-start cohorts shed extra subscribers at
+  // the first renewal, so they need their own SHAPE — re-rating one curve via M6 can only
+  // move the level, never the month-1 drop.
+  function curveFor(p, isNew) {
+    return (isNew && ENGINE_DATA.curves_new && ENGINE_DATA.curves_new[p])
+      ? ENGINE_DATA.curves_new[p] : ENGINE_DATA.curves[p];
+  }
+  function retention(p, ageM, m6Target, isNew) {
+    const cv = curveFor(p, isNew);
     const b = cv.b;
     const lam = cv.lambda || 0;
     const t = Math.max(ageM, 0);
@@ -858,8 +885,8 @@ function computeModel(controlState) {
 
   // 3-year retention sum at a given M6 target. Used to scale the fixed 3Y LTVs
   // when retention sliders / retention-related scenarios change the curve.
-  function retentionSum3Y(p, m6Target) {
-    const cv = ENGINE_DATA.curves[p];
+  function retentionSum3Y(p, m6Target, isNew) {
+    const cv = curveFor(p, isNew);
     const b = cv.b;
     const lam = cv.lambda || 0;
     let c;
@@ -888,16 +915,18 @@ function computeModel(controlState) {
   // Returns {gross, net} LTV per sub for a platform, given the current M6.
   // The fixed-LTV anchors scale linearly with the 3Y retention sum, so
   // retention scenarios still move LTV.
-  function ltvPair(p, m6Target) {
-    const scale = retentionSum3Y(p, m6Target) / RET_SUM_BASE[p];
-    return { gross: LTV_GROSS_3Y[p] * scale, net: LTV_NET_3Y[p] * scale };
+  function ltvPair(p, m6Target, price, isNew) {
+    const scale = retentionSum3Y(p, m6Target, isNew) / RET_SUM_BASE[p];
+    // LTV anchors were measured on $12.99 cohorts, so scale with the price actually charged.
+    const priceScale = (price || LTV_PRICE_REF) / LTV_PRICE_REF;
+    return { gross: LTV_GROSS_3Y[p] * scale * priceScale, net: LTV_NET_3Y[p] * scale * priceScale };
   }
 
   // === Initialize cohorts with legacy pre-May-1 history ===
   // Each cohort: { ts, size, price }. Future cohorts appended in the loop.
   const cohorts = {};
   for (const p of PLATFORMS) {
-    cohorts[p] = LEGACY_PARSED[p].map(c => ({ ts: c.ts, size: c.size, price: BASE_PRICE_MONTHLY, priceHiked: false }));
+    cohorts[p] = LEGACY_PARSED[p].map(c => ({ ts: c.ts, size: c.size, price: c.price, priceHiked: false, isNew: false }));
   }
   // Seed each legacy cohort's surviving stock as of week 0 under the platform's BASE M6
   // (pre-anchor regime — scenario toggles only act from week 0 onward). We then roll this
@@ -928,10 +957,10 @@ function computeModel(controlState) {
   // LTV cache: {gross, net} per (platform, m6) so the 60-week loop doesn't
   // re-evaluate the retention-sum integral when M6 hasn't changed.
   const ltvCache = new Map();
-  function getLTV(p, m6) {
-    const key = p + '|' + m6.toFixed(4);
+  function getLTV(p, m6, price, isNew) {
+    const key = p + '|' + m6.toFixed(4) + '|' + (price || LTV_PRICE_REF).toFixed(2) + '|' + (isNew ? 'n' : 'b');
     let v = ltvCache.get(key);
-    if (v == null) { v = ltvPair(p, m6); ltvCache.set(key, v); }
+    if (v == null) { v = ltvPair(p, m6, price, isNew); ltvCache.set(key, v); }
     return v;
   }
 
@@ -941,8 +970,10 @@ function computeModel(controlState) {
     const eff = effAt(w);
     lastEff = eff;
 
-    const priceDelta = isActive('priceIncrease', w) ? controlState.global.priceIncrease : 0;
-    const newPrice = BASE_PRICE_MONTHLY + priceDelta;  // Price Increase toggle adds priceDelta (+$2 -> $14.99) to new subs
+    // The Price Increase lever only moves the platforms still at $12.99 (LG/Samsung/Web);
+    // FireTV and Roku have already executed their rise to $18.99.
+    const leverOn = isActive('priceIncrease', w);
+    const priceDelta = leverOn ? controlState.global.priceIncrease : 0;
 
     let weekSpendTotal = 0, weekNewTotal = 0;
 
@@ -954,11 +985,13 @@ function computeModel(controlState) {
       const e = eff[p];
       const weeklySpend = (e.spend * 1e6 * e.spendMult * e.spendGate) / (WEEKS_IN_BUCKET[bkt] || 1);
       const paidSubs = e.cpa > 0 ? weeklySpend / e.cpa : 0;
-      // LG/Samsung also acquire a spend-independent organic baseline (partner-commit funded),
-      // so their CAC = (variable spend + partner commit) / (paid + organic) stays finite at $0 spend.
+      // LG/Samsung/Web also acquire a spend-independent organic baseline (partner-commit or
+      // unattributed web checkout), so CAC stays finite at $0 variable spend.
       const organicSubs = ORGANIC_WEEKLY[p] || 0;
       const newSubs = paidSubs + organicSubs;
-      cohorts[p].push({ ts: wkTs, size: newSubs, price: newPrice, priceHiked: priceDelta > 0, active: newSubs, lastAgeM: 0 });
+      const hiked = priceDelta > 0 && PRICE_LEVER_PLATFORMS.indexOf(p) >= 0;
+      const newPrice = PLATFORM_PRICE[p] + (hiked ? priceDelta : 0);
+      cohorts[p].push({ ts: wkTs, size: newSubs, price: newPrice, priceHiked: hiked, active: newSubs, lastAgeM: 0, isNew: true });
       perPlatformWeekly[p].spend.push(weeklySpend);
       perPlatformWeekly[p].newSubs.push(newSubs);
       weekSpendTotal += weeklySpend;
@@ -975,7 +1008,7 @@ function computeModel(controlState) {
       for (const p of PLATFORMS) {
         const totalBoost = SEASONAL_BOOST_DECEMBER[p];
         if (totalBoost > 0) {
-          cohorts[p].push({ ts: wkTs, size: totalBoost / decWeeks, price: newPrice, priceHiked: priceDelta > 0, active: totalBoost / decWeeks, lastAgeM: 0 });
+          cohorts[p].push({ ts: wkTs, size: totalBoost / decWeeks, price: PLATFORM_PRICE[p], priceHiked: false, active: totalBoost / decWeeks, lastAgeM: 0, isNew: true });
         }
       }
     }
@@ -989,19 +1022,22 @@ function computeModel(controlState) {
       const e = eff[p];
       const m6 = e.m6;
       const list = cohorts[p];
+      const pricePen = controlState.global.priceM6Penalty;
       let active = 0, arr = 0;
       for (let j = 0; j < list.length; j++) {
         const co = list[j];
         const ageM = (wkTs - co.ts) / (DAYS_PER_MONTH * 86400000);
         if (ageM < 0) continue;
-        // Per-cohort M6 for THIS week's step = platform base + product-retention toggles (e.m6),
-        // minus the 5pp price-increase penalty for cohorts that actually pay the higher price.
+        // Per-cohort M6 for THIS week's step: the installed base runs on e.m6, cohorts acquired
+        // from the anchor forward run on e.m6New (paid-start + executed price rise already priced
+        // in), less the price-lever penalty for cohorts that took the lever increase.
         // Roll the cohort's surviving stock forward by the conditional survival over this step,
         // so retention changes act only going forward (no retroactive re-rating).
-        const cohM6 = Math.max(0.02, Math.min(0.98, m6 - (co.priceHiked ? 0.05 : 0)));
+        const cohBase = co.isNew ? e.m6New : m6;
+        const cohM6 = Math.max(0.02, Math.min(0.98, cohBase - (co.priceHiked ? pricePen : 0)));
         if (ageM > co.lastAgeM) {
-          const denom = retention(p, co.lastAgeM, cohM6);
-          co.active *= denom > 0 ? (retention(p, ageM, cohM6) / denom) : 0;
+          const denom = retention(p, co.lastAgeM, cohM6, co.isNew);
+          co.active *= denom > 0 ? (retention(p, ageM, cohM6, co.isNew) / denom) : 0;
           co.lastAgeM = ageM;
         }
         active += co.active;
@@ -1020,7 +1056,10 @@ function computeModel(controlState) {
         cacDisplay = (platformVarSpend + platformPartnerWk) / perPlatformWeekly[p].newSubs[w];
       }
       perPlatformWeekly[p].cac.push(cacDisplay);
-      const ltv = getLTV(p, m6);  // {gross, net} scaled with current M6
+      // LTV:CAC is an ACQUISITION metric, so use the new-cohort retention regime and the
+      // price new subs actually pay on this platform.
+      const acqPrice = PLATFORM_PRICE[p] + ((leverOn && PRICE_LEVER_PLATFORMS.indexOf(p) >= 0) ? controlState.global.priceIncrease : 0);
+      const ltv = getLTV(p, e.m6New, acqPrice, true);
       perPlatformWeekly[p].ltvCacGross.push(cacDisplay > 0 ? ltv.gross / cacDisplay : 0);
       perPlatformWeekly[p].ltvCacNet  .push(cacDisplay > 0 ? ltv.net   / cacDisplay : 0);
       weekARRTotal += arr;
@@ -1056,8 +1095,8 @@ function computeModel(controlState) {
       mkt += platformPartnerMonthly * (7 / DAYS_PER_MONTH) * (EOY_2026_IDX + 1);
     }
     const cac = nNew > 0 ? mkt / nNew : 0;
-    const m6 = lastEff[p].m6;
-    const ltv = getLTV(p, m6);  // {gross, net}
+    const acqPriceS = PLATFORM_PRICE[p] + ((controlState.toggles.priceIncrease && PRICE_LEVER_PLATFORMS.indexOf(p) >= 0) ? controlState.global.priceIncrease : 0);
+    const ltv = getLTV(p, lastEff[p].m6New, acqPriceS, true);  // {gross, net}
     return {
       platform: p, subs, arr, mkt, cac,
       ltvGross: ltv.gross,
@@ -1073,7 +1112,7 @@ function computeModel(controlState) {
   // weeklyMarketingSpend already includes partner commitments.
   let modeledJulToDec2026 = 0;
   for (let w = 0; w <= EOY_2026_IDX; w++) modeledJulToDec2026 += weeklyMarketingSpend[w];
-  const annual2026MarketingSpend = JAN_JUN_2026_ACTUAL_TOTAL + modeledJulToDec2026;
+  const annual2026MarketingSpend = JAN_JUL_2026_ACTUAL_TOTAL + modeledJulToDec2026;
 
   // Blended trailing-13-week CAC / LTV:CAC (net) / LTV:CAC (gross) around EoY 2026
   const startW = Math.max(0, EOY_2026_IDX - 12);
@@ -1103,7 +1142,7 @@ function computeModel(controlState) {
 const BASELINE = computeModel({
   toggles: Object.fromEntries(TOGGLES.map(t => [t.id, false])),
   platforms: JSON.parse(JSON.stringify(DEFAULT_PLATFORM_STATE)),
-  global: { priceIncrease: 6.0 },
+  global: { priceIncrease: 6.0, priceM6Penalty: 0.05 },
 });
 
 // =====================================================================
@@ -1283,7 +1322,7 @@ function buildLeversBody() {
   if (state.activeTab === 'Global') {
     const note = document.createElement('div');
     note.style.cssText = 'font-size:12px;color:var(--w-midnight-60);letter-spacing:-0.005em;line-height:1.4;margin-top:2px;';
-    note.textContent = 'Global controls affect every platform. Price increase only applies to new subscribers and only when the Price Increase scenario toggle is on.';
+    note.textContent = 'Global controls apply when the Price Increase scenario toggle is on. That lever moves LG, Samsung and Web from $12.99 to $18.99 — FireTV and Roku are already at $18.99. Only new subscribers are affected; existing subs are grandfathered.';
     body.appendChild(note);
     const sliders = document.createElement('div');
     sliders.className = 'sliders';
@@ -1297,6 +1336,15 @@ function buildLeversBody() {
       baseline: 6.0,
       suffix: '/mo',
       onInput: v => { state.global.priceIncrease = v; },
+    }));
+    sliders.appendChild(sliderRow({
+      id: 'globalPriceM6',
+      label: 'Price increase M6 penalty',
+      value: state.global.priceM6Penalty,
+      fmt: v => '-' + (v * 100).toFixed(0) + 'pp',
+      min: 0, max: 0.20, step: 0.01,
+      baseline: 0.05,
+      onInput: v => { state.global.priceM6Penalty = v; },
     }));
     body.appendChild(sliders);
     return;
@@ -1323,12 +1371,21 @@ function buildLeversBody() {
   sliders.style.marginTop = '12px';
   sliders.appendChild(sliderRow({
     id: 'm6_' + p,
-    label: 'M6 retention rate',
+    label: 'M6 retention — installed base',
     value: ps.m6,
     fmt: v => (v * 100).toFixed(0) + '%',
-    min: 0.20, max: 0.85, step: 0.01,
+    min: 0.10, max: 0.85, step: 0.01,
     baseline: base.m6,
     onInput: v => { ps.m6 = v; },
+  }));
+  sliders.appendChild(sliderRow({
+    id: 'm6new_' + p,
+    label: 'M6 retention — new cohorts',
+    value: ps.m6New,
+    fmt: v => (v * 100).toFixed(0) + '%',
+    min: 0.10, max: 0.85, step: 0.01,
+    baseline: base.m6New,
+    onInput: v => { ps.m6New = v; },
   }));
   body.appendChild(sliders);
 }
@@ -1469,7 +1526,7 @@ function render() {
   const spendKPI = m.kpis.annual2026MarketingSpend;
   qs('#kpiSpend').innerHTML = dollarSign + (spendKPI / 1e6).toFixed(1) + '<span class="unit">M</span>';
   const baseSpend = BASELINE.kpis.annual2026MarketingSpend;
-  qs('#kpiSpendSub').textContent = 'Jan\u2013Jun actuals (' + dollarSign + (JAN_JUN_2026_ACTUAL_TOTAL/1e6).toFixed(1) + 'M) + Jul\u2013Dec modeled';
+  qs('#kpiSpendSub').textContent = 'Jan\u2013Jul actuals (' + dollarSign + (JAN_JUL_2026_ACTUAL_TOTAL/1e6).toFixed(1) + 'M) + Aug\u2013Dec modeled';
 
   qs('#kpiCac').textContent = dollarSign + Math.round(m.kpis.blendedCAC);
   const cacDelta = m.kpis.blendedCAC - BASELINE.kpis.blendedCAC;
@@ -1771,7 +1828,7 @@ function resetBaseline() {
   state.toggles = Object.fromEntries(TOGGLES.map(t => [t.id, false]));
   state.toggleStart = defaultToggleStarts();
   state.platforms = JSON.parse(JSON.stringify(DEFAULT_PLATFORM_STATE));
-  state.global = { priceIncrease: 6.0 };
+  state.global = { priceIncrease: 6.0, priceM6Penalty: 0.05 };
   buildToggles();
   buildLeversBody();
   render();
