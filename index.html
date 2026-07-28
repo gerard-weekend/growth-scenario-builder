@@ -710,8 +710,13 @@ const PRICE_LEVER_PLATFORMS = ['LG', 'Samsung', 'Web'];
 // Hazard-adjusted retention curves anchor the base to financial truth at 2026-07-27.
 // Buckets are MONTHLY for Aug-Dec 2026 (Aug spans Jul 27-Aug 31) plus a single Q1'27
 // bucket; CPA is likewise per-bucket (defaults flat per platform).
-// spend = TOTAL $M for the bucket. FireTV/Roku Aug-Dec are set from the current weekly
-// run-rate (weeks of Jul 13/20) x weeks in bucket; Q1'27 and all of Web stay on plan.
+// spend = TOTAL $M for the bucket, Aug-Dec from the CURRENT weekly run-rate x weeks in
+// bucket; Q1'27 and all of Web stay on plan. IMPORTANT: these are de-contaminated. The
+// spend mart's `platform_mapped` is derived from campaign-name tokens, NOT the device
+// platform, so TikTok CTV campaigns named `..._tv_..` were filed as 'roku'. Real Roku
+// inventory fell to $38k in Jul-2026 (Roku ads switched off); the TikTok CTV upper-funnel
+// (~$276k/mo) is cross-platform and is split between FireTV and Roku pro-rata to adds.
+// CPA values are Gerard's stated assumptions for the rest of 2026, not derived blends.
 // m6    = month-6 retention of the INSTALLED BASE (fitted to observed data).
 // m6New = month-6 retention of cohorts acquired from the anchor forward. Comes from a
 //         SEPARATE fitted curve (ENGINE_DATA.curves_new) that carries the paid-start
@@ -719,11 +724,11 @@ const PRICE_LEVER_PLATFORMS = ['LG', 'Samsung', 'Web'];
 //         the $18.99 move shows up in CPA, and a higher price also selects for intent,
 //         so the sign is unclear. Use the Global tab slider to test one.
 const DEFAULT_PLATFORM_STATE = {
-  FireTV:  { spend: bk(1.798, 1.199, 1.199, 1.498, 1.199, 2.0), cpa: bkflat( 44), m6: 0.5351, m6New: 0.4399 },
-  Roku:    { spend: bk(0.562, 0.374, 0.374, 0.468, 0.374, 2.0), cpa: bkflat(118), m6: 0.3926, m6New: 0.4147 },
-  LG:      { spend: bk(0.000, 0.000, 0.000, 0.000, 0.000, 0.0), cpa: bkflat( 90), m6: 0.3474, m6New: 0.2896 },
-  Samsung: { spend: bk(0.000, 0.000, 0.000, 0.000, 0.000, 0.0), cpa: bkflat( 90), m6: 0.4088, m6New: 0.4088 },
-  Web:     { spend: bk(0.197, 0.167, 0.500, 0.500, 0.500, 3.0), cpa: bkflat( 70), m6: 0.3779, m6New: 0.3779 },
+  FireTV:  { spend: bk(2.040, 1.360, 1.360, 1.700, 1.360, 2.0), cpa: bkflat( 63), m6: 0.5351, m6New: 0.4399 },
+  Roku:    { spend: bk(0.147, 0.098, 0.098, 0.123, 0.098, 2.0), cpa: bkflat( 45), m6: 0.3926, m6New: 0.4147 },
+  LG:      { spend: bk(0.000, 0.000, 0.000, 0.000, 0.000, 0.0), cpa: bkflat(100), m6: 0.3474, m6New: 0.2896 },
+  Samsung: { spend: bk(0.000, 0.000, 0.000, 0.000, 0.000, 0.0), cpa: bkflat(120), m6: 0.4088, m6New: 0.4088 },
+  Web:     { spend: bk(0.197, 0.167, 0.500, 0.500, 0.500, 3.0), cpa: bkflat(150), m6: 0.3779, m6New: 0.3779 },
 };
 // Seasonal Boost — flat organic Christmas lift, distributed per-week across December
 const SEASONAL_BOOST_DECEMBER = { FireTV: 6000, Roku: 6000, LG: 1500, Samsung: 1500, Web: 0 };
@@ -731,7 +736,7 @@ const SEASONAL_BOOST_DECEMBER = { FireTV: 6000, Roku: 6000, LG: 1500, Samsung: 1
 // carriage commitment (both platforms ran ~$0 variable ad spend through mid-2026). Set from
 // the recent zero-variable-spend run-rate. Injected every week regardless of the spend
 // slider; the slider adds INCREMENTAL paid subs on top.
-const ORGANIC_WEEKLY = { LG: 646, Samsung: 300, Web: 117 };
+const ORGANIC_WEEKLY = { FireTV: 181, Roku: 253, LG: 646, Samsung: 300, Web: 117 };
 
 // Fixed 3-year LTV per platform (finance-blessed values). The engine uses these
 // directly as the "anchor" LTVs at default retention. When the M6 slider moves
