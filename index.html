@@ -702,6 +702,14 @@ const PLATFORM_PRICE = { FireTV: 18.99, Roku: 18.99, LG: 12.99, Samsung: 12.99, 
 const LTV_PRICE_REF = 12.99;
 // Platforms still at $12.99, i.e. the ones the Price Increase lever acts on.
 const PRICE_LEVER_PLATFORMS = ['LG', 'Samsung', 'Web'];
+// Lifecycle Marketing Gains toggle: "we intercept 1 in every 100 cancellations", i.e. the
+// churn HAZARD is multiplied by 0.99 in every period. Scaling the instantaneous hazard by k
+// makes survival R(t)^k exactly; since h(t) = c/(b+t) + lambda for this curve family, that is
+// exactly c -> k*c and lambda -> k*lambda. NB this is NOT the same as cutting cumulative
+// month-6 churn by 1% -- that overstates the gain, because a save only holds until the next
+// period's hazard. The hazard view also compounds with age, which is correct: the longer a
+// cohort lives, the more cancellation events there have been to intercept.
+const LIFECYCLE_HAZARD_MULT = 0.99;
 
 // Defaults: latest observed state at the 2026-07-06 anchor carried forward,
 // representing the "do nothing different" trajectory. Spend is per bucket (see below)
@@ -724,11 +732,11 @@ const PRICE_LEVER_PLATFORMS = ['LG', 'Samsung', 'Web'];
 //         the $18.99 move shows up in CPA, and a higher price also selects for intent,
 //         so the sign is unclear. Use the Global tab slider to test one.
 const DEFAULT_PLATFORM_STATE = {
-  FireTV:  { spend: bk(2.040, 1.360, 1.360, 1.700, 1.360, 2.0), cpa: bkflat( 63), m6: 0.5351, m6New: 0.4399 },
-  Roku:    { spend: bk(0.147, 0.098, 0.098, 0.123, 0.098, 2.0), cpa: bkflat( 45), m6: 0.3926, m6New: 0.4147 },
-  LG:      { spend: bk(0.000, 0.000, 0.000, 0.000, 0.000, 0.0), cpa: bkflat(100), m6: 0.3474, m6New: 0.2896 },
-  Samsung: { spend: bk(0.000, 0.000, 0.000, 0.000, 0.000, 0.0), cpa: bkflat(120), m6: 0.4088, m6New: 0.4088 },
-  Web:     { spend: bk(0.197, 0.167, 0.500, 0.500, 0.500, 3.0), cpa: bkflat(150), m6: 0.3779, m6New: 0.3779 },
+  FireTV:  { spend: bk(1.600, 1.600, 2.000, 2.000, 2.000, 2.00), cpa: bkflat( 63), m6: 0.5351, m6New: 0.4399 },
+  Roku:    { spend: bk(0.200, 0.200, 0.200, 0.200, 0.200, 0.60), cpa: bkflat( 45), m6: 0.3926, m6New: 0.4147 },
+  LG:      { spend: bk(0.200, 0.200, 0.200, 0.200, 0.200, 0.60), cpa: bkflat(100), m6: 0.3474, m6New: 0.2896 },
+  Samsung: { spend: bk(0.200, 0.200, 0.200, 0.200, 0.200, 0.60), cpa: bkflat(120), m6: 0.4088, m6New: 0.4088 },
+  Web:     { spend: bk(0.250, 0.250, 0.250, 0.250, 0.250, 0.75), cpa: bkflat(110), m6: 0.3779, m6New: 0.3779 },
 };
 // Seasonal Boost — flat organic Christmas lift, distributed per-week across December
 const SEASONAL_BOOST_DECEMBER = { FireTV: 6000, Roku: 6000, LG: 1500, Samsung: 1500, Web: 0 };
@@ -763,8 +771,7 @@ const JAN_JUL_2026_ACTUAL_TOTAL =
 const TOGGLES = [
   { id: 'rokuMP',            name: 'Roku Multiplatform Ships',            desc: '+4pp M6 retention on Roku',       mech: 'Adds 4 percentage points to Roku\u2019s month-6 retention rate.' },
   { id: 'priceIncrease',     name: 'Price Increase (LG/Samsung/Web)',      desc: '$12.99 → $18.99; −5pp M6',     mech: 'Moves LG, Samsung and Web/Multiplatform new subscribers from $12.99 to $18.99 (+$6/mo) from the chosen start month; existing subs grandfathered. FireTV and Roku are already at $18.99 so this lever does not affect them. Also reduces M6 retention on the affected platforms by 5pp (adjustable on the Global tab).' },
-  { id: 'wofLaunch',         name: 'WoF Multiplatform Launch',             desc: '+3pp M6 on FireTV, LG, Samsung',  mech: 'Adds 3 percentage points to month-6 retention on FireTV, LG and Samsung.' },
-  { id: 'aysLaunch',         name: 'AYS Multiplatform Launch',             desc: '+2pp M6 on FireTV, LG, Samsung',  mech: 'Adds 2 percentage points to month-6 retention on FireTV, LG and Samsung.' },
+  { id: 'lifecycleGains',    name: 'Lifecycle Marketing Gains',            desc: 'Save 1 in 100 cancellations',     mech: 'Intercepts 1 of every 100 cancellations on every platform from the chosen start month: the monthly churn hazard is multiplied by 0.99, so survival becomes R(t)\u2070\u00b7\u2079\u2079. Applies to the installed base and new cohorts alike, and only from the start month forward. The benefit compounds with cohort age, since older cohorts have had more cancellation events to intercept.' },
   { id: 'rokuCPAv2',         name: 'Roku CPAv2 Launch',                    desc: '+50% marketing spend on Roku',    mech: 'Multiplies all Roku quarterly spend by 1.5x.' },
   { id: 'lgsamConv',         name: 'LG/Samsung Conversion Breakthrough',   desc: '-30% CPA on LG & Samsung',        mech: 'Reduces CPA on LG and Samsung by 30%.' },
   { id: 'seasonalBoost',     name: 'Seasonal Boost',                       desc: '+15k organic subs in December',   mech: 'Flat organic Christmas lift: adds 6k FireTV, 6k Roku, 1.5k LG, 1.5k Samsung subscribers across Dec 2026 (no marketing cost).' },
@@ -852,8 +859,8 @@ function computeModel(controlState) {
 
       // Product-retention toggles lift BOTH regimes (they help the base and new cohorts alike).
       if (isActive('rokuMP', w)     && p === 'Roku')                                              { m6 += 0.04; m6New += 0.04; }
-      if (isActive('wofLaunch', w)  && (p === 'FireTV' || p === 'LG' || p === 'Samsung'))         { m6 += 0.03; m6New += 0.03; }
-      if (isActive('aysLaunch', w)  && (p === 'FireTV' || p === 'LG' || p === 'Samsung'))         { m6 += 0.02; m6New += 0.02; }
+      // NB Lifecycle Marketing Gains is NOT applied here -- it scales the churn hazard inside
+      // retention(), not the M6 level, so the M6 sliders keep showing the user's own inputs.
       m6 = Math.min(0.98, m6); m6New = Math.min(0.98, m6New);
       if (isActive('rokuCPAv2', w)  && p === 'Roku')                                                spendMult *= 1.50;
       if (isActive('lgsamConv', w)  && (p === 'LG' || p === 'Samsung'))                             cpa *= 0.70;
@@ -874,7 +881,7 @@ function computeModel(controlState) {
     return (isNew && ENGINE_DATA.curves_new && ENGINE_DATA.curves_new[p])
       ? ENGINE_DATA.curves_new[p] : ENGINE_DATA.curves[p];
   }
-  function retention(p, ageM, m6Target, isNew) {
+  function retention(p, ageM, m6Target, isNew, hazMult) {
     const cv = curveFor(p, isNew);
     const b = cv.b;
     const lam = cv.lambda || 0;
@@ -885,12 +892,14 @@ function computeModel(controlState) {
     } else {
       c = -(Math.log(Math.max(m6Target, 0.001)) + 6 * lam) / Math.log(1 + 6 / b);
     }
-    return Math.pow(1 + t / b, -c) * Math.exp(-lam * t);
+    // hazMult k scales the churn hazard, giving survival R(t)^k (see LIFECYCLE_HAZARD_MULT).
+    const k = (hazMult == null) ? 1 : hazMult;
+    return Math.pow(1 + t / b, -c * k) * Math.exp(-lam * k * t);
   }
 
   // 3-year retention sum at a given M6 target. Used to scale the fixed 3Y LTVs
   // when retention sliders / retention-related scenarios change the curve.
-  function retentionSum3Y(p, m6Target, isNew) {
+  function retentionSum3Y(p, m6Target, isNew, hazMult) {
     const cv = curveFor(p, isNew);
     const b = cv.b;
     const lam = cv.lambda || 0;
@@ -900,9 +909,10 @@ function computeModel(controlState) {
     } else {
       c = -(Math.log(Math.max(m6Target, 0.001)) + 6 * lam) / Math.log(1 + 6 / b);
     }
+    const k = (hazMult == null) ? 1 : hazMult;
     let sum = 0;
     for (let m = 0; m <= 36; m++) {
-      sum += Math.pow(1 + m / b, -c) * Math.exp(-lam * m);
+      sum += Math.pow(1 + m / b, -c * k) * Math.exp(-lam * k * m);
     }
     return sum;
   }
@@ -920,8 +930,8 @@ function computeModel(controlState) {
   // Returns {gross, net} LTV per sub for a platform, given the current M6.
   // The fixed-LTV anchors scale linearly with the 3Y retention sum, so
   // retention scenarios still move LTV.
-  function ltvPair(p, m6Target, price, isNew) {
-    const scale = retentionSum3Y(p, m6Target, isNew) / RET_SUM_BASE[p];
+  function ltvPair(p, m6Target, price, isNew, hazMult) {
+    const scale = retentionSum3Y(p, m6Target, isNew, hazMult) / RET_SUM_BASE[p];
     // LTV anchors were measured on $12.99 cohorts, so scale with the price actually charged.
     const priceScale = (price || LTV_PRICE_REF) / LTV_PRICE_REF;
     return { gross: LTV_GROSS_3Y[p] * scale * priceScale, net: LTV_NET_3Y[p] * scale * priceScale };
@@ -956,16 +966,18 @@ function computeModel(controlState) {
   const weeklyMarketingSpend = [];  // total weekly $, including partner commits
 
   let lastEff = null;
+  let lastHazMult = 1;
   const partnerWeekly = (ENGINE_DATA.partner_commit.LG + ENGINE_DATA.partner_commit.Samsung) * (7 / DAYS_PER_MONTH);
 
   // LTV cache so we don't recompute the 60-month sum every cell when M6 is unchanged
   // LTV cache: {gross, net} per (platform, m6) so the 60-week loop doesn't
   // re-evaluate the retention-sum integral when M6 hasn't changed.
   const ltvCache = new Map();
-  function getLTV(p, m6, price, isNew) {
-    const key = p + '|' + m6.toFixed(4) + '|' + (price || LTV_PRICE_REF).toFixed(2) + '|' + (isNew ? 'n' : 'b');
+  function getLTV(p, m6, price, isNew, hazMult) {
+    const k = (hazMult == null) ? 1 : hazMult;
+    const key = p + '|' + m6.toFixed(4) + '|' + (price || LTV_PRICE_REF).toFixed(2) + '|' + (isNew ? 'n' : 'b') + '|' + k.toFixed(3);
     let v = ltvCache.get(key);
-    if (v == null) { v = ltvPair(p, m6, price, isNew); ltvCache.set(key, v); }
+    if (v == null) { v = ltvPair(p, m6, price, isNew, k); ltvCache.set(key, v); }
     return v;
   }
 
@@ -974,6 +986,9 @@ function computeModel(controlState) {
     const bkt = bucketOf(WEEKS[w]);
     const eff = effAt(w);
     lastEff = eff;
+    // Lifecycle Marketing Gains: intercept 1 in 100 cancellations from its start month on.
+    const hazMult = isActive('lifecycleGains', w) ? LIFECYCLE_HAZARD_MULT : 1;
+    lastHazMult = hazMult;
 
     // The Price Increase lever only moves the platforms still at $12.99 (LG/Samsung/Web);
     // FireTV and Roku have already executed their rise to $18.99.
@@ -1041,8 +1056,8 @@ function computeModel(controlState) {
         const cohBase = co.isNew ? e.m6New : m6;
         const cohM6 = Math.max(0.02, Math.min(0.98, cohBase - (co.priceHiked ? pricePen : 0)));
         if (ageM > co.lastAgeM) {
-          const denom = retention(p, co.lastAgeM, cohM6, co.isNew);
-          co.active *= denom > 0 ? (retention(p, ageM, cohM6, co.isNew) / denom) : 0;
+          const denom = retention(p, co.lastAgeM, cohM6, co.isNew, hazMult);
+          co.active *= denom > 0 ? (retention(p, ageM, cohM6, co.isNew, hazMult) / denom) : 0;
           co.lastAgeM = ageM;
         }
         active += co.active;
@@ -1064,7 +1079,7 @@ function computeModel(controlState) {
       // LTV:CAC is an ACQUISITION metric, so use the new-cohort retention regime and the
       // price new subs actually pay on this platform.
       const acqPrice = PLATFORM_PRICE[p] + ((leverOn && PRICE_LEVER_PLATFORMS.indexOf(p) >= 0) ? controlState.global.priceIncrease : 0);
-      const ltv = getLTV(p, e.m6New, acqPrice, true);
+      const ltv = getLTV(p, e.m6New, acqPrice, true, hazMult);
       perPlatformWeekly[p].ltvCacGross.push(cacDisplay > 0 ? ltv.gross / cacDisplay : 0);
       perPlatformWeekly[p].ltvCacNet  .push(cacDisplay > 0 ? ltv.net   / cacDisplay : 0);
       weekARRTotal += arr;
@@ -1101,7 +1116,7 @@ function computeModel(controlState) {
     }
     const cac = nNew > 0 ? mkt / nNew : 0;
     const acqPriceS = PLATFORM_PRICE[p] + ((controlState.toggles.priceIncrease && PRICE_LEVER_PLATFORMS.indexOf(p) >= 0) ? controlState.global.priceIncrease : 0);
-    const ltv = getLTV(p, lastEff[p].m6New, acqPriceS, true);  // {gross, net}
+    const ltv = getLTV(p, lastEff[p].m6New, acqPriceS, true, lastHazMult);  // {gross, net}
     return {
       platform: p, subs, arr, mkt, cac,
       ltvGross: ltv.gross,
